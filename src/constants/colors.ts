@@ -1,140 +1,111 @@
 /**
- * CHARTE GRAPHIQUE E-TSENA v4.0
- * Palette de couleurs professionnelle bleu-violet
- * Inspirée des dégradés doux bleu clair vers violet clair
- * 
- * Principes:
- * - Bleu clair (#60A5FA, #3B82F6) = Primaire (achats, actions)
- * - Violet clair (#A78BFA, #8B5CF6) = Secondaire (navigation, accents)
- * - Dégradés doux = Transitions fluides bleu → violet
- * - Gris = Neutres (texte, bordures, fonds)
+ * ================================
+ *   CHARTE GRAPHIQUE E-TSENA
+ *   Couleur de base: #7143b5 (Violet principal)
+ *   Design moderne et cohérent sur toutes les pages
+ * ================================
  */
 
-// ==================== COULEURS PRIMAIRES ====================
-
-// Couleurs principales de l'application - Design Bleu-Violet
+// ==================== COULEURS PRINCIPALES ====================
 export const COLORS = {
-  // BLEU - Couleur primaire (E-tsena brand)
-  primary: '#60A5FA',           // Bleu clair principal
-  primaryDark: '#3B82F6',       // Bleu foncé pour hover/focus
-  primaryLight: '#93C5FD',      // Bleu très clair pour variantes
-  primaryUltraLight: '#DBEAFE', // Bleu ultra clair pour backgrounds
+  // BRAND / PRIMARY (Violet #7143b5 - couleur de base)
+  primary: '#7143b5',        // Violet principal BASE
+  primaryDark: '#5d3694',    // Violet foncé (-20% luminosité)
+  primaryLight: '#8b5fd4',   // Violet clair (+15% luminosité)
+  primaryVeryLight: '#b99ae6', // Violet très clair (+40% luminosité)
+  white: '#FFFFFF',          // Blanc pur
+
+  // COULEURS SECONDAIRES (compatibles avec #7143b5)
+  secondary: '#4a90e2',      // Bleu harmonieux
+  secondaryDark: '#357ab8',  // Bleu foncé
+  secondaryLight: '#6aa8ed', // Bleu clair
   
-  // VIOLET - Couleur secondaire (navigation, accents)
-  secondary: '#A78BFA',         // Violet clair élégant
-  secondaryDark: '#8B5CF6',     // Violet foncé pour hover
-  secondaryLight: '#C4B5FD',    // Violet clair pour variantes
-  secondaryUltraLight: '#EDE9FE', // Violet ultra clair pour backgrounds
+  // COULEURS D'ACCENTUATION (complémentaires au violet)
+  accent: '#ffa726',         // Orange ambré (accentuation chaude)
+  accentLight: '#ffb74d',    // Orange clair
+  accentDark: '#f57c00',     // Orange foncé
   
-  // Couleurs de fond avec dégradés doux
-  background: '#F0F9FF',     // Bleu très clair (fond général)
-  surface: '#FFFFFF',        // Blanc (cartes, modals)
-  surfaceVariant: '#EFF6FF', // Bleu ultra léger (zones secondaires)
-  
-  // Texte
-  text: '#1E293B',          // Gris foncé (texte principal)
-  textLight: '#64748B',     // Gris moyen (texte secondaire)
-  textDisabled: '#CBD5E1',  // Gris clair (texte désactivé)
-  
-  // États
-  success: '#10B981',       // Vert (succès, validations)
-  warning: '#F59E0B',       // Orange (avertissements)
-  error: '#EF4444',         // Rouge (erreurs)
-  info: '#3B82F6',          // Bleu (informations)
-  
-  // Bordures et dividers
-  border: '#E2E8F0',        // Bordure légère
-  borderDark: '#CBD5E1',    // Bordure foncée
-  divider: '#F1F5F9',       // Séparateur
-  
-  // Overlay et ombres
-  overlay: 'rgba(0, 0, 0, 0.5)',
+  accentGreen: '#66bb6a',    // Vert pour succès/validation
+  accentRed: '#ef5350',      // Rouge pour alertes
+  accentYellow: '#ffee58',   // Jaune pour avertissements
+
+  // ACCENT BUTTONS (harmonieux avec #7143b5)
+  cyan: '#00bcd4',           // Cyan/Turquoise
+  cyanLight: '#4dd0e1',      // Cyan clair
+  coral: '#f06292',          // Coral/Pink
+  coralLight: '#f48fb1',     // Coral clair
+
+  // ICON COLORS (palette harmonieuse avec #7143b5)
+  iconYellow: '#ffc107',     // Jaune ambré
+  iconPink: '#ec407a',       // Rose vif
+  iconViolet: '#9c27b0',     // Violet secondaire
+  iconCoral: '#ff7043',      // Corail orangé
+
+  // TEXTES
+  text: '#212121',           // Texte principal très sombre
+  textLight: '#757575',      // Texte secondaire gris
+  textWhite: '#FFFFFF',      // Texte blanc sur fond coloré
+  placeholder: '#BDBDBD',    // Placeholder
+
+  // FEEDBACK / STATUS
+  success: '#4caf50',        // Vert validation
+  warning: '#ff9800',        // Orange warning
+  danger: '#f44336',         // Rouge erreur
+  info: '#2196f3',           // Bleu information
+
+  // LAYOUT & SURFACES
+  background: '#f5f5f5',     // Fond général gris clair
+  surface: '#FFFFFF',        // Carte blanche
+  cardShadow: 'rgba(113, 67, 181, 0.15)', // Ombre violette #7143b5
+  border: '#e0e0e0',         // Bordure
+  divider: '#eeeeee',        // Séparateurs
+  overlay: 'rgba(0,0,0,0.5)',
+
   shadow: '#000000',
 };
 
-/**
- * Couleurs par section de l'application - Design Bleu-Violet
- * Palette harmonieuse avec dégradés doux
- */
+// ==================== COULEURS PAR SECTION ====================
+// CHARTE UNIFIÉE : TOUTES les pages utilisent le MÊME violet #7143b5
+// Design ergonomique et cohérent
 export const SECTION_COLORS = {
-  // 🛒 Section Achats/Listes (Bleu-Violet)
-  achats: {
-    primary: '#60A5FA',      // Bleu clair du design
-    light: '#DBEAFE',        // Bleu très clair
-    medium: '#BFDBFE',       // Bleu clair
-    text: '#3B82F6',         // Bleu foncé
-    gradient: ['#60A5FA', '#A78BFA', '#8B5CF6'] as const, // Dégradé bleu-violet
-  },
-  
-  // 📊 Section Rapports (Bleu)
-  rapports: {
-    primary: '#3B82F6',      // Bleu du design
-    light: '#DBEAFE',        // Bleu très clair
-    medium: '#BFDBFE',       // Bleu clair
-    text: '#2563EB',         // Bleu foncé
-    gradient: ['#3B82F6', '#60A5FA', '#93C5FD'] as const, // Dégradé bleu
-  },
-  
-  // 📈 Section Statistiques (Violet)
-  statistiques: {
-    primary: '#8B5CF6',      // Violet profond
-    light: '#EDE9FE',        // Violet très clair
-    medium: '#DDD6FE',       // Violet clair
-    text: '#7C3AED',         // Violet foncé
-    gradient: ['#8B5CF6', '#A78BFA', '#C4B5FD'] as const, // Dégradé violet
-  },
-  
-  // 📦 Section Produits (Bleu doux)
-  produits: {
-    primary: '#60A5FA',      // Bleu doux
-    light: '#DBEAFE',        // Bleu très clair
-    medium: '#BFDBFE',       // Bleu clair
-    text: '#3B82F6',         // Bleu foncé
-    gradient: ['#60A5FA', '#93C5FD'] as const, // Dégradé bleu doux
-  },
-  
-  // 🏠 Section Accueil (Gradient Bleu-Violet)
   home: {
-    primary: '#60A5FA',      // Bleu principal
-    light: '#DBEAFE',        // Bleu très clair
-    medium: '#BFDBFE',       // Bleu clair
-    text: '#3B82F6',         // Bleu foncé
-    gradient: ['#60A5FA', '#A78BFA', '#8B5CF6'] as const, // Dégradé bleu-violet complet
+    primary: COLORS.primary,          // #7143b5
+    light: COLORS.background,         // #f5f5f5
+    medium: COLORS.primaryVeryLight,  // #b99ae6
+    text: COLORS.text,
+    gradient: [COLORS.primary, COLORS.primaryLight] as const,
+  },
+  achats: {
+    primary: COLORS.primary,          // #7143b5 (MÊME couleur)
+    light: '#ede7f6',                 // Violet très clair
+    medium: COLORS.primaryLight,      // #8b5fd4
+    text: COLORS.text,
+    gradient: [COLORS.primary, COLORS.primaryLight] as const,
+  },
+  rapports: {
+    primary: COLORS.primary,          // #7143b5 (MÊME couleur)
+    light: '#ede7f6',                 // Violet très clair
+    medium: COLORS.primaryLight,      // #8b5fd4
+    text: COLORS.text,
+    gradient: [COLORS.primary, COLORS.primaryLight] as const,
+  },
+  statistiques: {
+    primary: COLORS.primary,          // #7143b5 (MÊME couleur)
+    light: '#ede7f6',                 // Violet très clair
+    medium: COLORS.primaryLight,      // #8b5fd4
+    text: COLORS.text,
+    gradient: [COLORS.primaryLight, COLORS.primary] as const,
+  },
+  produits: {
+    primary: COLORS.primary,          // #7143b5 (MÊME couleur)
+    light: '#ede7f6',                 // Violet très clair
+    medium: COLORS.primaryLight,      // #8b5fd4
+    text: COLORS.text,
+    gradient: [COLORS.primary, COLORS.primaryLight] as const,
   },
 };
 
-/**
- * Justification ergonomique des couleurs - Design Bleu-Violet :
- * 
- * 1. 🎯 CONTRASTE ET ACCESSIBILITÉ
- *    - Tous les textes ont un ratio de contraste ≥ 4.5:1 (WCAG AA)
- *    - Les couleurs bleu-violet sont apaisantes et professionnelles
- * 
- * 2. 🧠 PSYCHOLOGIE DES COULEURS
- *    - Bleu-Violet (Accueil/Achats) : Confiance, sérénité, modernité
- *    - Bleu (Rapports) : Fiabilité, clarté, professionnalisme
- *    - Violet (Statistiques) : Créativité, sagesse, innovation
- *    - Bleu doux (Produits) : Calme, qualité, raffinement
- * 
- * 3. 🎨 COHÉRENCE VISUELLE
- *    - Palette harmonieuse bleu-violet avec dégradés doux
- *    - Gradients fluides pour un effet premium et moderne
- *    - Teintes claires pour les fonds (évite la fatigue visuelle)
- * 
- * 4. 🔍 NAVIGATION INTUITIVE
- *    - Chaque section a une nuance distincte de la palette bleu-violet
- *    - L'utilisateur identifie rapidement sa position
- *    - Design cohérent et professionnel
- * 
- * 5. 💡 ÉTATS ET FEEDBACK
- *    - Vert (succès) : Universel pour les validations
- *    - Rouge (erreur) : Conventionnel pour les erreurs
- *    - Orange (warning) : Attire l'attention sans alarmer
- */
-
-/**
- * Opacités recommandées
- */
+// ==================== OPACITÉS ====================
 export const OPACITY = {
   disabled: 0.38,
   inactive: 0.54,
@@ -142,9 +113,7 @@ export const OPACITY = {
   overlay: 0.5,
 };
 
-/**
- * Élévations (pour les ombres Material Design)
- */
+// ==================== OMBRES ====================
 export const ELEVATION = {
   small: {
     shadowColor: COLORS.shadow,
@@ -169,19 +138,14 @@ export const ELEVATION = {
   },
 };
 
-/**
- * Animations - Durées et courbes d'animation
- */
+// ==================== ANIMATIONS ====================
 export const ANIMATIONS = {
-  // Durées (en millisecondes)
   duration: {
     fast: 200,
     normal: 300,
     slow: 500,
     verySlow: 800,
   },
-  
-  // Courbes d'animation (easing)
   easing: {
     easeIn: 'ease-in',
     easeOut: 'ease-out',
@@ -191,9 +155,7 @@ export const ANIMATIONS = {
   },
 };
 
-/**
- * Export par défaut pour un import simple
- */
+// ==================== EXPORT GLOBAL ====================
 export default {
   COLORS,
   SECTION_COLORS,
