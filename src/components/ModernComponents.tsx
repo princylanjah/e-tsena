@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ViewStyle, TextStyle } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@constants/colors';
@@ -447,6 +447,10 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: 'white',
+  },
+  headerRightButtons: {
+    flexDirection: 'row',
+    gap: 8,
   },
   headerRightButton: {
     width: 44,
