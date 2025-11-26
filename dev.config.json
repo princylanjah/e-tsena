@@ -1,18 +1,7 @@
 {
   "name": "E-tsena Development Configuration",
   "version": "2.0.0",
-  "description": "Configuration pour l'environnement de développement E-tsena",
-  "scripts": {
-    "setup": "npm install && npx expo install",
-    "dev": "npx expo start",
-    "android": "npx expo run:android",
-    "ios": "npx expo run:ios",
-    "build:android": "npx expo build:android",
-    "build:ios": "npx expo build:ios",
-    "test": "jest",
-    "lint": "eslint .",
-    "format": "prettier --write ."
-  },
+  "description": "Configuration d'exécution pour l'environnement de développement E-tsena",
   "development": {
     "database": {
       "type": "SQLite",
@@ -21,28 +10,14 @@
     },
     "ui": {
       "theme": "modern",
-      "color_scheme": "indigo_violet",
+      "colorScheme": "indigo_violet",
       "animations": true
     },
     "features": {
       "search": true,
       "filters": true,
       "statistics": true,
-      "reports": true,
-      "tips": true
-    }
-  },
-  "build": {
-    "production": {
-      "optimize": true,
-      "minify": true,
-      "source_maps": false
-    },
-    "development": {
-      "optimize": false,
-      "minify": false,
-      "source_maps": true,
-      "hot_reload": true
+      "reports": true
     }
   }
 }

@@ -1,730 +1,420 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Animated, Dimensions, TextInput, Modal } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, 
+  Animated, Dimensions, StatusBar, ActivityIndicator
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { getDb } from '@db/init';
-import { COLORS, SECTION_COLORS } from '@constants/colors';
+import { LinearGradient } from 'expo-linear-gradient';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { ModernHeader, ModernCard, StatCard, ActionButton } from '../../src/components/ModernComponents';
-import { fadeScaleIn } from '../../src/utils/animations';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const isSmallScreen = SCREEN_WIDTH < 360;
+import { getDb } from '../../src/db/init';
+import { useTheme } from '../context/ThemeContext';
 
-interface Statistique {
-  totalDepenses: number;
-  nombreAchats: number;
-  produitLePlusAchete: string;
-  meilleurJour: string;
-}
-
-interface Transaction {
-  id: number;
-  dateAchat: string;
-  nomListe: string;
-  produit: string;
-  quantite: number;
-  prixUnitaire: number;
-  prixTotal: number;
-}
-
-interface Produit {
-  id: number;
-  libelle: string;
-}
+const { width } = Dimensions.get('window');
 
 export default function Rapports() {
-  const [stats, setStats] = useState<Statistique>({
-    totalDepenses: 0,
-    nombreAchats: 0,
-    produitLePlusAchete: 'Aucun',
-    meilleurJour: 'Aucun'
-  });
-  const [totalThisMonth, setTotalThisMonth] = useState(0);
-  const [produits, setProduits] = useState<Produit[]>([]);
-  const [selectedProduit, setSelectedProduit] = useState<number | null>(null);
-  const [dateDebut, setDateDebut] = useState('');
-  const [dateFin, setDateFin] = useState('');
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [showAnalysis, setShowAnalysis] = useState(false);
-  const [totalProduitAnalyse, setTotalProduitAnalyse] = useState(0);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [showProduitPicker, setShowProduitPicker] = useState(false);
+  const { activeTheme } = useTheme();
+  const s = getStyles(activeTheme);
 
+  // --- ÉTATS ---
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    total: 0,
+    month: 0,
+    count: 0,
+    topProduct: 'Aucun',
+    avgBasket: 0
+  });
+
+  // États Analyse Période
+  const [dateDebut, setDateDebut] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [dateFin, setDateFin] = useState(new Date());
+  const [periodPurchases, setPeriodPurchases] = useState<any[]>([]);
+  const [periodTotal, setPeriodTotal] = useState(0);
+  const [showPeriodResults, setShowPeriodResults] = useState(false);
+  
+  const [showPickerStart, setShowPickerStart] = useState(false);
+  const [showPickerEnd, setShowPickerEnd] = useState(false);
+
+  // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
 
   useEffect(() => {
-    loadData();
+    loadGlobalStats();
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 800, useNativeDriver: true })
+    ]).start();
   }, []);
 
-  useEffect(() => {
-    if (!loading) {
-      fadeScaleIn(fadeAnim, scaleAnim, 300).start();
-    }
-  }, [loading]);
-
-  const loadData = () => {
+  // 1. CHARGEMENT DES STATS GLOBALES
+  const loadGlobalStats = () => {
     try {
-      setLoading(true);
       const db = getDb();
-
-      // Total dépenses
-      const totalResult = db.getAllSync(`
-        SELECT COALESCE(SUM(la.quantite * la.prixUnitaire), 0) as totalDepenses 
-        FROM LigneAchat la 
-        WHERE la.quantite > 0 AND la.prixUnitaire > 0
+      const [totalRes] = db.getAllSync('SELECT SUM(prixTotal) as t FROM LigneAchat');
+      const monthStr = format(new Date(), 'yyyy-MM');
+      const [monthRes] = db.getAllSync(`
+        SELECT SUM(l.prixTotal) as t 
+        FROM LigneAchat l JOIN Achat a ON a.id = l.idAchat 
+        WHERE strftime('%Y-%m', a.dateAchat) = ?`, [monthStr]);
+      const [countRes] = db.getAllSync('SELECT COUNT(id) as c FROM Achat');
+      const [topRes] = db.getAllSync(`
+        SELECT libelleProduit, SUM(quantite) as q 
+        FROM LigneAchat GROUP BY libelleProduit ORDER BY q DESC LIMIT 1
       `);
 
-      // Nombre d'achats
-      const countResult = db.getAllSync(`
-        SELECT COUNT(DISTINCT a.id) as nombreAchats 
-        FROM Achat a 
-        JOIN LigneAchat la ON a.id = la.idAchat 
-        WHERE la.quantite > 0 AND la.prixUnitaire > 0
-      `);
-
-      // Produit le plus acheté
-      const topProduct = db.getAllSync(`
-        SELECT libelleProduit as libelle, SUM(quantite) as total_quantite 
-        FROM LigneAchat 
-        WHERE quantite > 0 AND prixUnitaire > 0 
-        GROUP BY libelleProduit 
-        ORDER BY total_quantite DESC 
-        LIMIT 1
-      `);
-
-      // Meilleur jour
-      const bestDay = db.getAllSync(`
-        SELECT DATE(a.dateAchat) as jour, SUM(la.quantite * la.prixUnitaire) as total_jour 
-        FROM Achat a 
-        JOIN LigneAchat la ON a.id = la.idAchat 
-        WHERE la.quantite > 0 AND la.prixUnitaire > 0 
-        GROUP BY DATE(a.dateAchat) 
-        ORDER BY total_jour DESC 
-        LIMIT 1
-      `);
-
-      // Total mois en cours
-      const monthResult = db.getAllSync(`
-        SELECT COALESCE(SUM(la.quantite * la.prixUnitaire), 0) as totalThisMonth 
-        FROM LigneAchat la 
-        JOIN Achat a ON a.id = la.idAchat 
-        WHERE la.quantite > 0 AND la.prixUnitaire > 0 
-        AND strftime('%Y-%m', a.dateAchat) = strftime('%Y-%m', 'now')
-      `);
-
-      // Produits disponibles
-      const productsResult = db.getAllSync(`
-        SELECT DISTINCT libelleProduit as libelle 
-        FROM LigneAchat 
-        WHERE quantite > 0 AND prixUnitaire > 0 
-        ORDER BY libelleProduit ASC
-      `);
+      const total = (totalRes as any)?.t || 0;
+      const count = (countRes as any)?.c || 0;
 
       setStats({
-        totalDepenses: (totalResult[0] as any)?.totalDepenses || 0,
-        nombreAchats: (countResult[0] as any)?.nombreAchats || 0,
-        produitLePlusAchete: topProduct.length ? (topProduct[0] as any).libelle : 'Aucun',
-        meilleurJour: bestDay.length ? format(new Date((bestDay[0] as any).jour), 'dd MMMM yyyy', { locale: fr }) : 'Aucun'
+        total: total,
+        month: (monthRes as any)?.t || 0,
+        count: count,
+        topProduct: (topRes as any)?.libelleProduit || 'Aucun',
+        avgBasket: count > 0 ? Math.round(total / count) : 0
       });
-
-      setTotalThisMonth((monthResult[0] as any)?.totalThisMonth || 0);
-      setProduits(productsResult.map((p: any, i) => ({ id: i + 1, libelle: p.libelle })));
-      setLoading(false);
-    } catch (e) {
-      console.error('Erreur:', e);
-      Alert.alert('Erreur', 'Impossible de charger les données');
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  const handleAnalyze = () => {
-    if (!selectedProduit || !dateDebut || !dateFin) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
+  // 2. ANALYSE DE PÉRIODE (Filtrer + Liste)
+  const handleAnalyzePeriod = () => {
+    try {
+      const db = getDb();
+      const start = dateDebut.toISOString();
+      const end = dateFin.toISOString();
+
+      // Récupérer les achats complets
+      const result = db.getAllSync(`
+        SELECT a.id, a.nomListe, a.dateAchat, SUM(l.prixTotal) as totalAchat, COUNT(l.id) as nbArticles
+        FROM Achat a 
+        JOIN LigneAchat l ON a.id = l.idAchat 
+        WHERE a.dateAchat BETWEEN ? AND ?
+        GROUP BY a.id
+        ORDER BY a.dateAchat DESC
+      `, [start, end]);
+
+      const total = result.reduce((acc: number, curr: any) => acc + curr.totalAchat, 0);
+      
+      setPeriodPurchases(result);
+      setPeriodTotal(total);
+      setShowPeriodResults(true);
+    } catch (e) { Alert.alert("Erreur", "Impossible d'analyser la période"); }
+  };
+
+  // 3. EXPORT PDF & PARTAGE
+  const handleExportPDF = async () => {
+    if (periodPurchases.length === 0) {
+      Alert.alert("Info", "Veuillez d'abord lancer une analyse de période pour exporter.");
       return;
     }
 
     try {
-      setAnalyzing(true);
-      const db = getDb();
-      const produitLibelle = produits.find(p => p.id === selectedProduit)?.libelle;
+      const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 20px; }
+              h1 { color: ${activeTheme.primary}; text-align: center; }
+              .header { margin-bottom: 30px; text-align: center; color: #555; }
+              table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+              th { background-color: ${activeTheme.primary}; color: white; padding: 10px; text-align: left; }
+              td { border-bottom: 1px solid #ddd; padding: 10px; }
+              .total { font-size: 20px; font-weight: bold; text-align: right; margin-top: 20px; color: ${activeTheme.primary}; }
+            </style>
+          </head>
+          <body>
+            <h1>Rapport E-tsena</h1>
+            <div class="header">
+              <p>Période du <b>${format(dateDebut, 'dd/MM/yyyy')}</b> au <b>${format(dateFin, 'dd/MM/yyyy')}</b></p>
+            </div>
+            <table>
+              <tr>
+                <th>Date</th>
+                <th>Liste</th>
+                <th>Articles</th>
+                <th>Montant</th>
+              </tr>
+              ${periodPurchases.map((item: any) => `
+                <tr>
+                  <td>${format(new Date(item.dateAchat), 'dd/MM/yyyy')}</td>
+                  <td>${item.nomListe}</td>
+                  <td>${item.nbArticles}</td>
+                  <td>${item.totalAchat.toLocaleString()} Ar</td>
+                </tr>
+              `).join('')}
+            </table>
+            <div class="total">Total Période: ${periodTotal.toLocaleString()} Ar</div>
+          </body>
+        </html>
+      `;
 
-      if (!produitLibelle) return;
-
-      const result = db.getAllSync(`
-        SELECT la.id, a.dateAchat, a.nomListe, la.libelleProduit as produit, 
-               la.quantite, la.prixUnitaire, la.prixTotal 
-        FROM Achat a 
-        JOIN LigneAchat la ON a.id = la.idAchat 
-        WHERE la.libelleProduit = ? 
-        AND DATE(a.dateAchat) BETWEEN DATE(?) AND DATE(?) 
-        AND la.quantite > 0 AND la.prixUnitaire > 0 
-        ORDER BY a.dateAchat DESC
-      `, [produitLibelle, dateDebut, dateFin]) as Transaction[];
-
-      setTransactions(result);
-      setTotalProduitAnalyse(result.reduce((sum, t) => sum + t.prixTotal, 0));
-      setShowAnalysis(true);
-    } catch (e) {
-      console.error('Erreur:', e);
-      Alert.alert('Erreur', 'Impossible d\'analyser');
-    } finally {
-      setAnalyzing(false);
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    } catch (error) {
+      Alert.alert("Erreur", "Impossible de générer le PDF");
     }
   };
 
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <Ionicons name="analytics" size={60} color={COLORS.coral} />
-        <Text style={styles.loadingText}>Chargement...</Text>
-      </View>
-    );
-  }
+  const handleCreate = () => {
+    const db = getDb();
+    const res = db.runSync('INSERT INTO Achat (nomListe, dateAchat) VALUES (?, ?)', ['Nouvelle Liste', new Date().toISOString()]);
+    router.push(`/achat/${res.lastInsertRowId}`);
+  };
 
   return (
-    <Animated.View 
-      style={[
-        styles.container,
-        { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }
-      ]}
-    >
-      <ModernHeader
-        title="Rapports"
-        subtitle="Vue d'ensemble financière"
-        gradient={[COLORS.primary, COLORS.primaryLight]}
-        rightButton={{
-          icon: 'stats-chart',
-          onPress: () => router.push('/statistiques')
-        }}
-        settingsButton={{
-          icon: 'settings-outline',
-          onPress: () => Alert.alert('Paramètres', 'Thème, Mode sombre/clair, etc.')
-        }}
-      />
+    <View style={s.container}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+      {/* --- HEADER COURBÉ --- */}
+      <View style={s.headerContainer}>
+        <LinearGradient 
+          colors={activeTheme.gradient as any} 
+          style={s.headerGradient}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        >
+          <View style={s.headerContent}>
+            <View>
+               <Text style={s.headerTitle}>Rapports</Text>
+               <Text style={s.headerSub}>Synthèse financière</Text>
+            </View>
+            <TouchableOpacity style={s.pdfBtn} onPress={handleExportPDF}>
+               <Ionicons name="share-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </View>
+
+      <Animated.ScrollView 
+        contentContainerStyle={s.scrollContent} 
         showsVerticalScrollIndicator={false}
+        style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
       >
-        {/* Stats Cards Grid */}
-        <View style={styles.statsGrid}>
-          <StatCard
-            label="Total dépenses"
-            value={`${stats.totalDepenses.toLocaleString()} Ar`}
-            icon="wallet"
-            color={COLORS.primary}
-            style={styles.statCardItem}
-          />
-          <StatCard
-            label="Achats"
-            value={stats.nombreAchats}
-            icon="cart"
-            color={COLORS.secondary}
-            style={styles.statCardItem}
-          />
-          <StatCard
-            label="Ce mois"
-            value={`${totalThisMonth.toLocaleString()} Ar`}
-            icon="calendar"
-            color={COLORS.accent}
-            style={styles.statCardItem}
-          />
-          <StatCard
-            label="Produit le plus acheté"
-            value={stats.produitLePlusAchete}
-            icon="trophy"
-            color={COLORS.accentGreen}
-            style={styles.statCardItem}
-          />
+        
+        {/* --- 1. GRILLE STATS (OVERLAPPING) --- */}
+        <View style={s.statsGrid}>
+           {/* Carte Dépenses Totales */}
+           <View style={[s.statCardLarge, s.shadow]}>
+              <View style={[s.iconCircle, { backgroundColor: activeTheme.primary + '15' }]}>
+                 <Ionicons name="wallet" size={28} color={activeTheme.primary} />
+              </View>
+              <View>
+                 <Text style={s.cardLabel}>Total Dépensé</Text>
+                 <Text style={[s.cardValueLarge, { color: activeTheme.primary }]}>{stats.total.toLocaleString()} Ar</Text>
+              </View>
+           </View>
+
+           <View style={s.rowGap}>
+              {/* Carte Panier Moyen */}
+              <View style={[s.statCardSmall, s.shadow]}>
+                 <View style={s.cardHeaderSmall}>
+                    <Text style={s.cardLabel}>Panier Moyen</Text>
+                    <Ionicons name="trending-up" size={16} color={activeTheme.primary} />
+                 </View>
+                 <Text style={s.cardValueSmall}>{stats.avgBasket.toLocaleString()}</Text>
+                 <Text style={s.cardUnit}>Ar / course</Text>
+              </View>
+
+              {/* Carte Top Produit */}
+              <View style={[s.statCardSmall, s.shadow]}>
+                 <View style={s.cardHeaderSmall}>
+                    <Text style={s.cardLabel}>Top Produit</Text>
+                    <Ionicons name="ribbon" size={16} color="#F59E0B" />
+                 </View>
+                 <Text style={s.cardValueSmall} numberOfLines={1}>{stats.topProduct}</Text>
+                 <Text style={s.cardUnit}>Le plus acheté</Text>
+              </View>
+           </View>
         </View>
 
-        {/* Quick Actions */}
-        <ModernCard style={styles.actionsCard}>
-          <Text style={styles.sectionTitle}>Actions rapides</Text>
-          <View style={styles.actionsGrid}>
-            <ActionButton
-              label="Voir statistiques"
-              icon="stats-chart"
-              color="cyan"
-              onPress={() => router.push('/statistiques')}
-              small
-              style={styles.actionButton}
-            />
-            <ActionButton
-              label="Analyser produit"
-              icon="search"
-              color="coral"
-              onPress={() => setShowAnalysis(!showAnalysis)}
-              small
-              style={styles.actionButton}
-            />
-          </View>
-        </ModernCard>
+        {/* --- 2. ACTIONS RAPIDES --- */}
+        <View style={s.actionsRow}>
+           <TouchableOpacity style={[s.actionBtn, s.shadow]} onPress={() => router.push('/analyse_produit')}>
+              <LinearGradient colors={['#fff', '#f9fafb']} style={s.actionGradient}>
+                 <Ionicons name="search" size={22} color={activeTheme.primary} />
+                 <Text style={s.actionText}>Analyse Produit</Text>
+              </LinearGradient>
+           </TouchableOpacity>
 
-        {/* Analyse Section */}
-        {showAnalysis && (
-          <ModernCard style={styles.analyseCard}>
-            <Text style={styles.sectionTitle}>Analyse de produit</Text>
-            
-            {/* Product Picker */}
-            <TouchableOpacity
-              style={styles.inputField}
-              onPress={() => setShowProduitPicker(true)}
-            >
-              <Text style={[styles.inputText, !selectedProduit && styles.placeholder]}>
-                {selectedProduit 
-                  ? produits.find(p => p.id === selectedProduit)?.libelle 
-                  : 'Sélectionner un produit'}
-              </Text>
-              <Ionicons name="chevron-down" size={20} color={COLORS.textLight} />
-            </TouchableOpacity>
+           <TouchableOpacity style={[s.actionBtn, s.shadow]} onPress={() => router.push('/statistiques')}>
+              <LinearGradient colors={['#fff', '#f9fafb']} style={s.actionGradient}>
+                 <Ionicons name="bar-chart" size={22} color={activeTheme.primary} />
+                 <Text style={s.actionText}>Graphiques</Text>
+              </LinearGradient>
+           </TouchableOpacity>
+        </View>
 
-            {/* Date Range */}
-            <View style={styles.dateRow}>
-              <View style={styles.dateField}>
-                <Text style={styles.dateLabel}>Du</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  value={dateDebut}
-                  onChangeText={setDateDebut}
-                  placeholder="AAAA-MM-JJ"
-                  placeholderTextColor={COLORS.placeholder}
-                />
+        {/* --- 3. ANALYSE DE PÉRIODE --- */}
+        <View style={[s.periodCard, s.shadow]}>
+           <View style={[s.periodHeader, { backgroundColor: activeTheme.primary }]}>
+              <Ionicons name="calendar" size={20} color="#fff" />
+              <Text style={s.periodTitle}>Analyse de période</Text>
+           </View>
+           
+           <View style={s.periodBody}>
+              <Text style={s.periodDesc}>Sélectionnez deux dates pour voir les achats et générer un rapport PDF.</Text>
+              
+              <View style={s.dateRow}>
+                 <TouchableOpacity onPress={() => setShowPickerStart(true)} style={s.dateInput}>
+                    <Text style={s.dateLabel}>Du</Text>
+                    <Text style={s.dateValue}>{format(dateDebut, 'dd/MM/yyyy')}</Text>
+                 </TouchableOpacity>
+                 <Ionicons name="arrow-forward" size={20} color="#ccc" />
+                 <TouchableOpacity onPress={() => setShowPickerEnd(true)} style={s.dateInput}>
+                    <Text style={s.dateLabel}>Au</Text>
+                    <Text style={s.dateValue}>{format(dateFin, 'dd/MM/yyyy')}</Text>
+                 </TouchableOpacity>
               </View>
-              <View style={styles.dateField}>
-                <Text style={styles.dateLabel}>Au</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  value={dateFin}
-                  onChangeText={setDateFin}
-                  placeholder="AAAA-MM-JJ"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
-            </View>
 
-            <TouchableOpacity
-              style={[styles.analyzeButton, analyzing && styles.analyzeButtonDisabled]}
-              onPress={handleAnalyze}
-              disabled={analyzing}
-            >
-              <Ionicons name="analytics" size={20} color="white" />
-              <Text style={styles.analyzeButtonText}>
-                {analyzing ? 'Analyse en cours...' : 'Analyser'}
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity style={[s.btnAnalyze, { backgroundColor: activeTheme.primary }]} onPress={handleAnalyzePeriod}>
+                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Afficher les résultats</Text>
+              </TouchableOpacity>
 
-            {/* Résultats avec liste des produits */}
-            {transactions.length > 0 && (
-              <View style={styles.resultsSection}>
-                <View style={styles.resultsHeader}>
-                  <Text style={styles.resultsTitle}>Résultats ({transactions.length} produits)</Text>
-                  <Text style={styles.resultsTotal}>
-                    {totalProduitAnalyse.toLocaleString()} Ar
-                  </Text>
-                </View>
-                {transactions.map((t) => (
-                  <View key={t.id} style={styles.transactionCard}>
-                    <View style={styles.transactionLeft}>
-                      <Text style={styles.transactionDate}>
-                        {format(new Date(t.dateAchat), 'dd MMM yyyy')}
-                      </Text>
-                      <Text style={styles.transactionList}>{t.nomListe}</Text>
+              {/* RÉSULTATS LISTE */}
+              {showPeriodResults && (
+                 <View style={s.resultsContainer}>
+                    <View style={s.resultSummary}>
+                       <Text style={s.resultSummaryLabel}>Total Période</Text>
+                       <Text style={[s.resultSummaryValue, { color: activeTheme.primary }]}>{periodTotal.toLocaleString()} Ar</Text>
                     </View>
-                    <View style={styles.transactionRight}>
-                      <Text style={styles.transactionQty}>{t.quantite} × {t.prixUnitaire} Ar</Text>
-                      <Text style={styles.transactionTotal}>{t.prixTotal.toLocaleString()} Ar</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ModernCard>
-        )}
 
-        {/* Best Day Info */}
-        <ModernCard style={styles.bestDayCard}>
-          <View style={styles.bestDayHeader}>
-            <View style={styles.bestDayIcon}>
-              <Ionicons name="star" size={24} color={COLORS.iconYellow} />
-            </View>
-            <View style={styles.bestDayInfo}>
-              <Text style={styles.bestDayLabel}>Meilleur jour d'achat</Text>
-              <Text style={styles.bestDayValue}>{stats.meilleurJour}</Text>
-            </View>
-          </View>
-        </ModernCard>
+                    {periodPurchases.length === 0 ? (
+                       <Text style={s.emptyText}>Aucun achat sur cette période.</Text>
+                    ) : (
+                       periodPurchases.map((item: any, index: number) => (
+                          <View key={index} style={s.resultItem}>
+                             <View>
+                                <Text style={s.itemTitle}>{item.nomListe}</Text>
+                                <Text style={s.itemDate}>{format(new Date(item.dateAchat), 'dd MMMM yyyy', { locale: fr })}</Text>
+                             </View>
+                             <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={s.itemPrice}>{item.totalAchat.toLocaleString()} Ar</Text>
+                                <Text style={s.itemCount}>{item.nbArticles} articles</Text>
+                             </View>
+                          </View>
+                       ))
+                    )}
+                    
+                    {/* Bouton Export visible seulement si résultats */}
+                    {periodPurchases.length > 0 && (
+                        <TouchableOpacity style={[s.btnPdf, { borderColor: activeTheme.primary }]} onPress={handleExportPDF}>
+                           <Ionicons name="document-text-outline" size={20} color={activeTheme.primary} />
+                           <Text style={{ color: activeTheme.primary, fontWeight: '600' }}>Exporter en PDF</Text>
+                        </TouchableOpacity>
+                    )}
+                 </View>
+              )}
+           </View>
+        </View>
 
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </Animated.ScrollView>
 
-      {/* Product Picker Modal */}
-      <Modal
-        visible={showProduitPicker}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowProduitPicker(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Sélectionner un produit</Text>
-              <TouchableOpacity onPress={() => setShowProduitPicker(false)}>
-                <Ionicons name="close" size={24} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalScroll}>
-              {produits.map((p) => (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[
-                    styles.modalItem,
-                    selectedProduit === p.id && styles.modalItemSelected
-                  ]}
-                  onPress={() => {
-                    setSelectedProduit(p.id);
-                    setShowProduitPicker(false);
-                  }}
-                >
-                  <Text style={[
-                    styles.modalItemText,
-                    selectedProduit === p.id && styles.modalItemTextSelected
-                  ]}>
-                    {p.libelle}
-                  </Text>
-                  {selectedProduit === p.id && (
-                    <Ionicons name="checkmark" size={20} color={COLORS.coral} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      {/* DATE PICKERS */}
+      {showPickerStart && (
+        <DateTimePicker value={dateDebut} mode="date" onChange={(e, d) => { setShowPickerStart(false); if(d) setDateDebut(d); }} />
+      )}
+      {showPickerEnd && (
+        <DateTimePicker value={dateFin} mode="date" onChange={(e, d) => { setShowPickerEnd(false); if(d) setDateFin(d); }} />
+      )}
 
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => router.push('/')}
-        >
-          <Ionicons name="home-outline" size={24} color={COLORS.textLight} />
-          <Text style={styles.navLabel}>Accueil</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={[styles.navItem, styles.navItemActive]}>
-          <Ionicons name="wallet" size={24} color={COLORS.primary} />
-          <Text style={[styles.navLabel, styles.navLabelActive]}>Rapports</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => router.push('/statistiques')}
-        >
-          <Ionicons name="stats-chart-outline" size={24} color={COLORS.textLight} />
-          <Text style={styles.navLabel}>Stats</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="person-outline" size={24} color={COLORS.textLight} />
-          <Text style={styles.navLabel}>Profil</Text>
-        </TouchableOpacity>
+      {/* --- NAVBAR --- */}
+      <View style={s.navbar}>
+         <TouchableOpacity style={s.navItem} onPress={() => router.push('/')}>
+            <Ionicons name="home-outline" size={24} color="#9CA3AF" />
+            <Text style={[s.navText, { color: "#9CA3AF" }]}>Accueil</Text>
+         </TouchableOpacity>
+
+         <View style={{ top: -25 }}>
+            <TouchableOpacity style={[s.fab, { shadowColor: activeTheme.primary }]} onPress={handleCreate}>
+               <LinearGradient colors={activeTheme.gradient as any} style={s.fabGradient}>
+                  <Ionicons name="add" size={32} color="#fff" />
+               </LinearGradient>
+            </TouchableOpacity>
+         </View>
+
+         <TouchableOpacity style={s.navItem}>
+            <Ionicons name="pie-chart" size={24} color={activeTheme.primary} />
+            <Text style={[s.navText, { color: activeTheme.primary }]}>Rapports</Text>
+         </TouchableOpacity>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  center: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: COLORS.textLight,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: isSmallScreen ? 16 : 20,
-  },
+// 🎨 STYLES AVEC OVERLAPPING
+const getStyles = (theme: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  shadow: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+
+  // HEADER COURBÉ
+  headerContainer: { height: 180, borderBottomLeftRadius: 35, borderBottomRightRadius: 35, overflow: 'hidden' },
+  headerGradient: { flex: 1, paddingHorizontal: 24, paddingTop: 50 },
+  headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerTitle: { fontSize: 28, fontWeight: '800', color: '#fff' },
+  headerSub: { fontSize: 14, color: 'rgba(255,255,255,0.9)' },
+  pdfBtn: { padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12 },
+
+  // SCROLL & OVERLAPPING
+  scrollContent: { padding: 20, marginTop: -60 }, // 👈 Effet Overlapping ici (-60px)
+
+  // GRILLE STATS
+  statsGrid: { gap: 12, marginBottom: 20 },
+  statCardLarge: { backgroundColor: '#fff', borderRadius: 20, padding: 20, flexDirection: 'row', alignItems: 'center', gap: 15 },
+  iconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
+  cardLabel: { fontSize: 12, color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase' },
+  cardValueLarge: { fontSize: 24, fontWeight: '800' },
   
-  // Stats Grid
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: isSmallScreen ? 10 : 12,
-    marginBottom: 20,
-  },
-  statCardItem: {
-    width: isSmallScreen ? '48%' : '48%',
-  },
+  rowGap: { flexDirection: 'row', gap: 12 },
+  statCardSmall: { flex: 1, backgroundColor: '#fff', borderRadius: 18, padding: 16 },
+  cardHeaderSmall: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  cardValueSmall: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
+  cardUnit: { fontSize: 11, color: '#9CA3AF' },
+
+  // ACTIONS
+  actionsRow: { flexDirection: 'row', gap: 15, marginBottom: 20 },
+  actionBtn: { flex: 1, borderRadius: 18, backgroundColor: '#fff' },
+  actionGradient: { padding: 16, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 10, justifyContent: 'center' },
+  actionText: { fontWeight: '600', color: '#334155' },
+
+  // PERIOD ANALYSE
+  periodCard: { backgroundColor: '#fff', borderRadius: 20, overflow: 'hidden', marginBottom: 20 },
+  periodHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 15 },
+  periodTitle: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  periodBody: { padding: 20 },
+  periodDesc: { fontSize: 13, color: '#64748B', marginBottom: 15, lineHeight: 18 },
   
-  // Actions Card
-  actionsCard: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 16,
-  },
-  actionsGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-  },
+  dateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  dateInput: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 10, width: '42%', alignItems: 'center' },
+  dateLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '600' },
+  dateValue: { fontSize: 13, fontWeight: '600', color: '#334155', marginTop: 2 },
+
+  btnAnalyze: { padding: 14, borderRadius: 12, alignItems: 'center', width: '100%' },
+
+  // RÉSULTATS LISTE
+  resultsContainer: { marginTop: 20, borderTopWidth: 1, borderColor: '#F1F5F9', paddingTop: 20 },
+  resultSummary: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  resultSummaryLabel: { fontWeight: 'bold', fontSize: 16 },
+  resultSummaryValue: { fontWeight: 'bold', fontSize: 18 },
   
-  // Analyse Card
-  analyseCard: {
-    marginBottom: 20,
-  },
-  inputField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.background,
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  inputText: {
-    fontSize: 15,
-    color: COLORS.text,
-  },
-  placeholder: {
-    color: COLORS.placeholder,
-  },
-  dateRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  dateField: {
-    flex: 1,
-  },
-  dateLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textLight,
-    marginBottom: 6,
-  },
-  dateInput: {
-    backgroundColor: COLORS.background,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    fontSize: 14,
-    color: COLORS.text,
-  },
-  analyzeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.primary,
-    padding: 14,
-    borderRadius: 12,
-    gap: 8,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  analyzeButtonDisabled: {
-    opacity: 0.6,
-  },
-  analyzeButtonText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '600',
-  },
+  resultItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f0f0f0' },
+  itemTitle: { fontWeight: '600', color: '#333' },
+  itemDate: { fontSize: 11, color: '#888' },
+  itemPrice: { fontWeight: '700', color: '#333' },
+  itemCount: { fontSize: 11, color: '#888' },
+  emptyText: { textAlign: 'center', color: '#999', fontStyle: 'italic', padding: 10 },
   
-  // Results
-  resultsSection: {
-    marginTop: 20,
-  },
-  resultsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  resultsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  resultsTotal: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.coral,
-  },
-  transactionCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  transactionLeft: {
-    flex: 1,
-  },
-  transactionDate: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 2,
-  },
-  transactionList: {
-    fontSize: 12,
-    color: COLORS.textLight,
-  },
-  transactionRight: {
-    alignItems: 'flex-end',
-  },
-  transactionQty: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    marginBottom: 2,
-  },
-  transactionTotal: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  
-  // Best Day Card
-  bestDayCard: {
-    marginBottom: 20,
-  },
-  bestDayHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  bestDayIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: COLORS.iconYellow + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  bestDayInfo: {
-    flex: 1,
-  },
-  bestDayLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: COLORS.textLight,
-    marginBottom: 4,
-  },
-  bestDayValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '70%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  modalScroll: {
-    maxHeight: 400,
-  },
-  modalItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
-  },
-  modalItemSelected: {
-    backgroundColor: COLORS.coral + '10',
-  },
-  modalItemText: {
-    fontSize: 15,
-    color: COLORS.text,
-  },
-  modalItemTextSelected: {
-    fontWeight: '600',
-    color: COLORS.coral,
-  },
-  
-  // Bottom Navigation
-  bottomNav: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 8,
-    justifyContent: 'space-around',
-  },
-  navItem: {
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-  },
-  navItemActive: {
-    backgroundColor: COLORS.coral + '15',
-  },
-  navLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.textLight,
-    marginTop: 4,
-  },
-  navLabelActive: {
-    color: COLORS.coral,
-    fontWeight: '700',
-  },
+  btnPdf: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 12, borderRadius: 10, borderWidth: 1.5, marginTop: 20 },
+
+  // NAVBAR
+  navbar: { flexDirection: 'row', height: 80, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#eee', justifyContent: 'space-around', paddingTop: 10, paddingHorizontal: 20, position: 'absolute', bottom: 0, width: '100%' },
+  navItem: { alignItems: 'center' },
+  navText: { fontSize: 10, fontWeight: '600', marginTop: 4 },
+  fab: { width: 56, height: 56, borderRadius: 28, shadowOpacity: 0.3, elevation: 6 },
+  fabGradient: { width: '100%', height: '100%', borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
 });
