@@ -16,6 +16,7 @@ interface GradientCardProps {
   children?: React.ReactNode;
   onPress?: () => void;
   style?: ViewStyle;
+  headerRight?: React.ReactNode;
 }
 
 export const GradientCard: React.FC<GradientCardProps> = ({
@@ -25,7 +26,8 @@ export const GradientCard: React.FC<GradientCardProps> = ({
   gradient,
   children,
   onPress,
-  style
+  style,
+  headerRight
 }) => {
   const Container = onPress ? TouchableOpacity : View;
   
@@ -41,9 +43,12 @@ export const GradientCard: React.FC<GradientCardProps> = ({
         end={{ x: 1, y: 1 }}
         style={styles.gradientCard}
       >
-        <View style={styles.gradientCardHeader}>
-          <Text style={styles.gradientCardTitle}>{title}</Text>
-          {subtitle && <Text style={styles.gradientCardSubtitle}>{subtitle}</Text>}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View style={styles.gradientCardHeader}>
+            <Text style={styles.gradientCardTitle}>{title}</Text>
+            {subtitle && <Text style={styles.gradientCardSubtitle}>{subtitle}</Text>}
+          </View>
+          {headerRight}
         </View>
         
         {amount && (

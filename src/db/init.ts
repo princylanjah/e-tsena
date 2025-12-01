@@ -53,6 +53,17 @@ const migrateDatabase = (db: SQLite.SQLiteDatabase) => {
       console.error('❌ Erreur migration LigneAchat.unite:', e);
     }
   }
+
+  // Migration: Ajouter achatId à Notification
+  if (!columnExists(db, 'Notification', 'achatId')) {
+    console.log('📝 Migration: Ajout de la colonne "achatId" à Notification');
+    try {
+      db.execSync(`ALTER TABLE Notification ADD COLUMN achatId INTEGER`);
+      console.log('✅ Migration réussie: colonne "achatId" ajoutée à Notification');
+    } catch (e) {
+      console.error('❌ Erreur migration Notification.achatId:', e);
+    }
+  }
   
   // Migration: Ajouter libelleProduit et supprimer idProduit dans LigneAchat
   if (columnExists(db, 'LigneAchat', 'idProduit') && !columnExists(db, 'LigneAchat', 'libelleProduit')) {
@@ -169,6 +180,14 @@ export const initDatabase = () => {
       prixTotal REAL DEFAULT 0,
       unite TEXT DEFAULT 'pcs',
       FOREIGN KEY (idAchat) REFERENCES Achat(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS Notification (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      date TEXT NOT NULL,
+      read INTEGER DEFAULT 0
     );
   `);
   

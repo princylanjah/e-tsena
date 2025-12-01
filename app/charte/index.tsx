@@ -1,94 +1,110 @@
 import React from 'react';
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { COLORS, SECTION_COLORS } from '../../src/constants/colors';
+import { ScrollView, View, Text, StyleSheet, TouchableOpacity, Switch, StatusBar } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useTheme, THEMES, ThemeKey } from '../context/ThemeContext';
+import { useSettings } from '../../src/context/SettingsContext';
+import { router } from 'expo-router';
 
-const ColorRow = ({ label, hex }: { label: string; hex: string }) => (
-  <View style={styles.row}>
-    <View style={[styles.swatch, { backgroundColor: hex }]} />
-    <View style={styles.meta}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.hex}>{hex}</Text>
-    </View>
-  </View>
-);
-
-export default function ChartePage() {
-  const primary = [
-    ['Lavender', COLORS.lavender],          // #C6C2D9
-    ['Purple soft', COLORS.purpleSoft],     // #7E779A
-    ['Ice Gray', COLORS.iceGray],           // #F4F4F7
-    ['White', COLORS.white],                // #FFFFFF
-  ];
-
-  const secondary = [
-    ['Pink pastel', COLORS.pinkPastel],     // #F7A8BA
-    ['Light Peach', COLORS.peachLight],     // #F9C6B0
-    ['Cream', COLORS.cream],                // #FDF6EF
-  ];
-
-  const accents = [
-    ['Yellow soft', COLORS.accentYellow],   // #F5D76E
-    ['Red (error)', COLORS.accentRed],      // #E25555
-    ['Green (success)', COLORS.accentGreen],// #71C08E
-    ['Orange', COLORS.accentOrange],        // #F7A648
-  ];
-
-  const products = [
-    ['Blueberry violet', COLORS.blueberry], // #9A94C6
-    ['Pistachio green', COLORS.pistachio],  // #C7D3AA
-    ['Vanilla cream', COLORS.vanilla],      // #F0EADC
-  ];
+export default function ThemeSelectorPage() {
+  const { activeTheme, currentTheme, setTheme, isDarkMode, toggleDarkMode, getStyles } = useTheme();
+  const { t } = useSettings();
+  const insets = useSafeAreaInsets();
+  const s = getStyles(styles);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Charte graphique — Couleurs</Text>
+    <View style={s.container}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={s.container.backgroundColor} />
+      
+      {/* Header */}
+      <View style={[s.header, { paddingTop: insets.top + 10 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={s.text.color} />
+        </TouchableOpacity>
+        <Text style={s.title}>{t('customization')}</Text>
+      </View>
 
-      <Text style={styles.section}>Primary</Text>
-      {primary.map(([label, hex]) => (
-        <ColorRow key={label as string} label={label as string} hex={hex as string} />
-      ))}
-
-      <Text style={styles.section}>Secondary</Text>
-      {secondary.map(([label, hex]) => (
-        <ColorRow key={label as string} label={label as string} hex={hex as string} />
-      ))}
-
-      <Text style={styles.section}>Accents</Text>
-      {accents.map(([label, hex]) => (
-        <ColorRow key={label as string} label={label as string} hex={hex as string} />
-      ))}
-
-      <Text style={styles.section}>Product tones</Text>
-      {products.map(([label, hex]) => (
-        <ColorRow key={label as string} label={label as string} hex={hex as string} />
-      ))}
-
-      <Text style={styles.section}>Section examples</Text>
-      {Object.keys(SECTION_COLORS).map((key) => {
-        const s = (SECTION_COLORS as any)[key];
-        return (
-          <View key={key} style={styles.sectionBlock}>
-            <Text style={styles.sectionBlockTitle}>{key}</Text>
-            <ColorRow label="Primary" hex={s.primary} />
-            <ColorRow label="Light" hex={s.light} />
-            <ColorRow label="Medium" hex={s.medium} />
+      <ScrollView contentContainerStyle={s.content}>
+        
+        {/* Dark Mode Switch */}
+        <View style={s.card}>
+          <View style={s.rowBetween}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={[s.iconBox, { backgroundColor: isDarkMode ? '#333' : '#eee' }]}>
+                <Ionicons name={isDarkMode ? "moon" : "sunny"} size={22} color={activeTheme.primary} />
+              </View>
+              <View>
+                <Text style={s.cardTitle}>{t('dark_mode')}</Text>
+                <Text style={s.cardSub}>{t('dark_mode_desc')}</Text>
+              </View>
+            </View>
+            <Switch 
+              value={isDarkMode} 
+              onValueChange={toggleDarkMode}
+              trackColor={{ false: '#E5E7EB', true: activeTheme.primary }}
+              thumbColor={'#fff'}
+            />
           </View>
-        );
-      })}
-    </ScrollView>
+        </View>
+
+        <Text style={s.sectionTitle}>{t('available_themes')}</Text>
+        
+        <View style={s.grid}>
+          {(Object.keys(THEMES) as ThemeKey[]).map((key) => {
+            const theme = THEMES[key];
+            const isActive = currentTheme === key;
+            
+            return (
+              <TouchableOpacity 
+                key={key} 
+                style={[s.themeCard, isActive && { borderColor: theme.primary, borderWidth: 2 }]}
+                onPress={() => setTheme(key)}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={theme.gradient as any}
+                  style={s.previewGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  {isActive && (
+                    <View style={s.checkCircle}>
+                      <Ionicons name="checkmark" size={16} color={theme.primary} />
+                    </View>
+                  )}
+                </LinearGradient>
+                <Text style={[s.themeName, isActive && { color: theme.primary, fontWeight: 'bold' }]}>
+                  {theme.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+      </ScrollView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  content: { padding: 16, paddingBottom: 40 },
-  title: { fontSize: 20, fontWeight: '700', marginBottom: 12, color: COLORS.text },
-  section: { marginTop: 12, marginBottom: 8, fontSize: 14, fontWeight: '600', color: COLORS.textLight },
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  swatch: { width: 64, height: 40, borderRadius: 6, borderWidth: 1, borderColor: COLORS.border },
-  meta: { marginLeft: 12 },
-  label: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
-  hex: { fontSize: 12, color: COLORS.textLight, marginTop: 2 },
-  sectionBlock: { marginTop: 10, padding: 10, backgroundColor: COLORS.surface, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border },
-  sectionBlockTitle: { fontSize: 13, fontWeight: '700', color: COLORS.text, marginBottom: 8 },
+const styles = (c: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 20 },
+  backBtn: { marginRight: 16, padding: 4 },
+  title: { fontSize: 24, fontWeight: 'bold', color: c.text },
+  content: { padding: 20 },
+  card: { backgroundColor: c.card, borderRadius: 16, padding: 20, marginBottom: 30, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10 },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  iconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  cardTitle: { fontSize: 16, fontWeight: '600', color: c.text },
+  cardSub: { fontSize: 13, color: c.textSec, marginTop: 2 },
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: c.text, marginBottom: 16 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  themeCard: { width: '48%', backgroundColor: c.card, borderRadius: 16, padding: 8, elevation: 2, marginBottom: 4, borderWidth: 2, borderColor: 'transparent' },
+  previewGradient: { height: 80, borderRadius: 12, marginBottom: 10, justifyContent: 'center', alignItems: 'center' },
+  themeName: { textAlign: 'center', fontSize: 14, fontWeight: '500', color: c.text, marginBottom: 4 },
+  checkCircle: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center' },
+  
+  // Helpers
+  text: { color: c.text }
 });

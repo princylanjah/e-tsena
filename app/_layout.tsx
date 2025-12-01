@@ -4,6 +4,8 @@ import { initDatabase, checkDatabase } from '@db/init';
 import * as Font from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator, Text, TouchableOpacity, Alert, StatusBar } from 'react-native';
+import { ThemeProvider } from './context/ThemeContext';
+import { SettingsProvider } from '../src/context/SettingsContext';
 
 // 👇 MODIFICATION ICI : On utilise ".." pour remonter à la racine si le dossier est hors de "app"
 // Si cela ne marche pas, essaie : import { COLORS } from '@/constants/colors';
@@ -87,40 +89,42 @@ export default function Layout() {
 
   // --- 3. Application Principale ---
   return (
-    <>
-      {/* ✅ StatusBar VIOLETTE (#7143b5) pour correspondre à ton thème Violet/Accueil */}
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" />
+    <SettingsProvider>
+      <ThemeProvider>
+        {/* ✅ StatusBar VIOLETTE (#7143b5) pour correspondre à ton thème Violet/Accueil */}
+        <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" />
 
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        
-        <Stack.Screen 
-          name="achat/[id]/index" 
-          options={{ 
-            headerShown: false, 
-            title: 'Détails achat',
-            headerStyle: { backgroundColor: COLORS.primary },
-            headerTintColor: COLORS.white,
-            headerTitleStyle: { fontWeight: 'bold' }
-          }} 
-        />
-        
-        <Stack.Screen name="analyse-produit/index" options={{ headerShown: false }} />
-        
-        <Stack.Screen 
-          name="nouvel-achat/index" 
-          options={{ 
-            headerShown: true,
-            title: 'Nouvelle liste',
-            headerStyle: { backgroundColor: COLORS.primary },
-            headerTintColor: COLORS.white,
-            headerTitleStyle: { fontWeight: 'bold' },
-          }} 
-        />
-        
-        <Stack.Screen name="rapports/index" options={{ headerShown: false }} />
-        <Stack.Screen name="statistiques/index" options={{ headerShown: false }} />
-      </Stack>
-    </>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          
+          <Stack.Screen 
+            name="achat/[id]/index" 
+            options={{ 
+              headerShown: false, 
+              title: 'Détails achat',
+              headerStyle: { backgroundColor: COLORS.primary },
+              headerTintColor: COLORS.white,
+              headerTitleStyle: { fontWeight: 'bold' }
+            }} 
+          />
+          
+          <Stack.Screen name="analyse-produit/index" options={{ headerShown: false }} />
+          
+          <Stack.Screen 
+            name="nouvel-achat/index" 
+            options={{ 
+              headerShown: true,
+              title: 'Nouvelle liste',
+              headerStyle: { backgroundColor: COLORS.primary },
+              headerTintColor: COLORS.white,
+              headerTitleStyle: { fontWeight: 'bold' },
+            }} 
+          />
+          
+          <Stack.Screen name="rapports/index" options={{ headerShown: false }} />
+          <Stack.Screen name="statistiques/index" options={{ headerShown: false }} />
+        </Stack>
+      </ThemeProvider>
+    </SettingsProvider>
   );
 }
