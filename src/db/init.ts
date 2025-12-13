@@ -134,18 +134,6 @@ const migrateDatabase = (db: SQLite.SQLiteDatabase) => {
       }
     }
   }
-  
-  // Supprimer les tables inutiles (optionnel)
-  try {
-    db.execSync(`DROP TABLE IF EXISTS TypeProduit`);
-    db.execSync(`DROP TABLE IF EXISTS Rapport`);
-    db.execSync(`DROP TABLE IF EXISTS DepenseParCategorie`);
-    db.execSync(`DROP TABLE IF EXISTS DepenseParProduit`);
-    db.execSync(`DROP TABLE IF EXISTS DepenseParDate`);
-    console.log('🗑️ Tables inutiles supprimées');
-  } catch (e) {
-    console.warn('⚠️ Erreur suppression tables:', e);
-  }
 };
 
 export const initDatabase = () => {
@@ -159,9 +147,7 @@ export const initDatabase = () => {
     CREATE TABLE IF NOT EXISTS Produit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       libelle TEXT NOT NULL,
-      unite TEXT DEFAULT 'pcs',
-      idCategorie INTEGER,
-      prixMoyen REAL
+      unite TEXT DEFAULT 'pcs'
     );
     
     CREATE TABLE IF NOT EXISTS Achat (
@@ -187,7 +173,7 @@ export const initDatabase = () => {
       title TEXT NOT NULL,
       message TEXT NOT NULL,
       date TEXT NOT NULL,
-      read INTEGER DEFAULT 0
+      estLu INTEGER DEFAULT 0
     );
   `);
   
@@ -195,6 +181,17 @@ export const initDatabase = () => {
   
   // Appliquer les migrations
   migrateDatabase(db);
+
+  // Migration: Renommer 'read' en 'estLu' dans Notification
+  if (columnExists(db, 'Notification', 'read') && !columnExists(db, 'Notification', 'estLu')) {
+    console.log('📝 Migration: Renommage de "read" en "estLu" dans Notification');
+    try {
+      db.execSync(`ALTER TABLE Notification RENAME COLUMN read TO estLu`);
+      console.log('✅ Migration réussie: colonne "read" renommée en "estLu"');
+    } catch (e) {
+      console.error('❌ Erreur migration Notification.estLu:', e);
+    }
+  }
   
   // Insérer des produits par défaut si la table est vide
   try {
@@ -216,7 +213,7 @@ export const initDatabase = () => {
       
       produits.forEach(p => {
         db.runSync(
-          'INSERT INTO Produit (libelle, unite, idCategorie) VALUES (?, ?, 1)',
+          'INSERT INTO Produit (libelle, unite) VALUES (?, ?)',
           [p.libelle, p.unite]
         );
       });

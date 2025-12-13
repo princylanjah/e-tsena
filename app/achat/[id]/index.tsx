@@ -1,35 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { 
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
-  TextInput, Modal, StatusBar, KeyboardAvoidingView, Platform, Alert
+  TextInput, Modal, KeyboardAvoidingView, Platform, Alert, Keyboard
 } from 'react-native';
+import { ThemedStatusBar } from '../../../src/components/ThemedStatusBar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
+import formatMoney from '../../../src/utils/formatMoney';
 import { fr, enUS } from 'date-fns/locale';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { getDb } from '../../../src/db/init'; 
-import { useTheme } from '../../context/ThemeContext'; 
+import { useTheme } from '../../../src/context/ThemeContext'; 
 import { useSettings } from '../../../src/context/SettingsContext';
 import { registerForPushNotificationsAsync, scheduleShoppingReminder } from '../../../src/services/notificationService';
 import { ConfirmModal } from '../../../src/components/ConfirmModal';
+
+interface Achat {
+  id: number;
+  nomListe: string;
+  dateAchat: string;
+}
 
 export default function AchatDetails() {
   const { activeTheme, getStyles, isDarkMode } = useTheme();
   const { currency, language, t } = useSettings();
   const insets = useSafeAreaInsets();
-  const s = getStyles(styles); // Utilisation du nouveau système de styles
+  const s = getStyles(styles);
   const achatId = Number(useLocalSearchParams<{ id?: string }>().id);
   
+  // Référence pour scroller automatiquement vers le bas
+  const scrollViewRef = useRef<ScrollView>(null);
+
   // --- ÉTATS ---
-  const [achat, setAchat] = useState<any>(null);
+  const [achat, setAchat] = useState<Achat | null>(null);
   const [lignes, setLignes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const [editTitle, setEditTitle] = useState(false);
   const [title, setTitle] = useState('');
   const [newItem, setNewItem] = useState('');
   
@@ -57,53 +67,27 @@ export default function AchatDetails() {
   useEffect(() => {
     if (!achatId) return;
     loadData();
-    registerForPushNotificationsAsync(); // Demander la permission au chargement
+    registerForPushNotificationsAsync();
   }, [achatId]);
 
   const loadData = () => {
     try {
       const db = getDb();
-      const [a] = db.getAllSync(`SELECT * FROM Achat WHERE id = ?`, [achatId]);
+      const result = db.getAllSync('SELECT * FROM Achat WHERE id = ?', [achatId]);
+      const a = result[0] as Achat;
       if (!a) return;
       setAchat(a);
       setTitle(a.nomListe);
-      const items = db.getAllSync(`SELECT * FROM LigneAchat WHERE idAchat = ? ORDER BY id ASC`, [achatId]);
+      const items = db.getAllSync('SELECT * FROM LigneAchat WHERE idAchat = ? ORDER BY id ASC', [achatId]);
       setLignes(items.map((l: any) => ({ ...l, checked: l.quantite > 0 && l.prixUnitaire > 0 })));
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // --- AUTO-CLEAN ---
-  // Désactivé pour éviter la fermeture intempestive lors de la création/édition
-  /*
-  useEffect(() => {
-    if (loading || !achat) return;
-    const isNewEmptyList = (achat.nomListe === 'Nouvelle Liste' || !achat.nomListe.trim()) 
-                           && lignes.length === 0
-                           && newItem.trim() === '';
-
-    if (isNewEmptyList) {
-        const timer = setTimeout(() => {
-            try {
-                const db = getDb();
-                const currentCount = db.getFirstSync('SELECT count(*) as c FROM LigneAchat WHERE idAchat = ?', [achatId]) as {c: number};
-                if (currentCount.c === 0) {
-                    db.runSync('DELETE FROM LigneAchat WHERE idAchat = ?', [achatId]);
-                    db.runSync('DELETE FROM Achat WHERE id = ?', [achatId]);
-                    if (router.canGoBack()) router.back();
-                }
-            } catch (e) { console.log("Erreur auto-clean", e); }
-        }, 2000);
-        return () => clearTimeout(timer);
-    }
-  }, [loading, achat, lignes, newItem]);
-  */
-
   // --- ACTIONS ---
   const saveTitle = () => {
-    if (!title.trim()) return;
+    if (!title.trim() || !achat) return;
     getDb().runSync('UPDATE Achat SET nomListe = ? WHERE id = ?', [title, achatId]);
     setAchat({ ...achat, nomListe: title });
-    setEditTitle(false);
   };
 
   const addItem = () => {
@@ -115,26 +99,31 @@ export default function AchatDetails() {
         const newLine = { id: r.lastInsertRowId, libelleProduit: nom, quantite: 0, prixUnitaire: 0, prixTotal: 0, unite: 'pcs', checked: false };
         setLignes(prev => [...prev, newLine]);
         setNewItem('');
+        
+        // Scroll en bas après l'ajout pour voir le nouvel item
+        setTimeout(() => {
+          scrollViewRef.current?.scrollToEnd({ animated: true });
+        }, 100);
     } catch(e) { console.error(e); }
   };
 
   const toggle = (item: any) => {
     const idx = lignes.findIndex(l => l.id === item.id);
     const l = lignes[idx];
-    if (!l.checked) {
-      setQuickIdx(idx);
-      setQuickData({ nom: l.libelleProduit, qty: '1', prix: '', unite: l.unite || 'pcs' });
-      setQuickModal(true);
-    } else {
+    if (l.checked) {
       lignes[idx] = { ...l, quantite: 0, prixUnitaire: 0, prixTotal: 0, checked: false };
       setLignes([...lignes]);
       if (l.id) getDb().runSync('UPDATE LigneAchat SET quantite=0, prixUnitaire=0, prixTotal=0 WHERE id=?', [l.id]);
+    } else {
+      setQuickIdx(idx);
+      setQuickData({ nom: l.libelleProduit, qty: '1', prix: '', unite: l.unite || 'pcs' });
+      setQuickModal(true);
     }
   };
 
   const saveQuick = () => {
-    const qty = parseFloat(quickData.qty) || 0;
-    const prix = parseFloat(quickData.prix) || 0;
+    const qty = Number.parseFloat(quickData.qty) || 0;
+    const prix = Number.parseFloat(quickData.prix) || 0;
     const nom = quickData.nom ? quickData.nom.trim() : lignes[quickIdx].libelleProduit;
     const total = qty * prix;
     const l = lignes[quickIdx];
@@ -171,8 +160,8 @@ export default function AchatDetails() {
   };
 
   const saveEdit = () => {
-    const qty = parseFloat(editData.qty) || 0;
-    const prix = parseFloat(editData.prix) || 0;
+    const qty = Number.parseFloat(editData.qty) || 0;
+    const prix = Number.parseFloat(editData.prix) || 0;
     const nom = editData.nom.trim();
     const total = qty * prix;
     const l = lignes[editIdx];
@@ -182,7 +171,6 @@ export default function AchatDetails() {
     setEditModal(false);
   };
 
-  // --- RAPPEL ---
   const onDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
@@ -205,13 +193,14 @@ export default function AchatDetails() {
       } else {
         setMode('date');
       }
-    } else {
-      if (selectedDate) setReminderDate(selectedDate);
+    } else if (selectedDate) {
+      setReminderDate(selectedDate);
     }
   };
 
   const scheduleReminder = async (date: Date) => {
-      const id = await scheduleShoppingReminder(achat.nomListe, date, achatId);
+      if (!achat) return;
+      const id = await scheduleShoppingReminder(achat!.nomListe, date, achatId);
       if (id) {
           Alert.alert(t('reminder_scheduled'), `${t('reminder_notif_text')} ${format(date, 'dd/MM à HH:mm')}`);
       } else {
@@ -230,26 +219,35 @@ export default function AchatDetails() {
 
   return (
     <View style={s.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-
+      <ThemedStatusBar transparent />
+      
       {/* HEADER */}
       <LinearGradient colors={activeTheme.gradient as any} style={[s.header, { paddingTop: insets.top + 10 }]}>
+        <TouchableOpacity onPress={() => router.push('/')} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, opacity: 0.9 }}>
+          <Ionicons name="home-outline" size={14} color="rgba(255,255,255,0.8)" />
+          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, marginLeft: 4 }}>{t('home')}</Text>
+          <Ionicons name="chevron-forward" size={12} color="rgba(255,255,255,0.8)" style={{ marginHorizontal: 3 }} />
+          <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>{t('my_list')}</Text>
+        </TouchableOpacity>
+        
         <View style={s.headerContent}>
            <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
            </TouchableOpacity>
            <View style={{ flex: 1, marginHorizontal: 10 }}>
-               {editTitle ? (
-                   <TextInput style={s.titleInput} value={title} onChangeText={setTitle} onBlur={saveTitle} autoFocus />
-               ) : (
-                   <TouchableOpacity onPress={() => setEditTitle(true)}>
-                       <Text style={s.headerTitle} numberOfLines={1}>{achat.nomListe}</Text>
-                       <Text style={s.headerDate}>{format(new Date(achat.dateAchat), 'dd MMMM yyyy', {locale: language === 'en' ? enUS : fr})}</Text>
-                   </TouchableOpacity>
-               )}
+               <TextInput 
+                   style={s.titleInputSimple} 
+                   value={title} 
+                   onChangeText={setTitle} 
+                   onBlur={saveTitle}
+                   placeholder={t('list_title_placeholder') || "Titre de liste"}
+                   placeholderTextColor="rgba(255,255,255,0.6)"
+                   returnKeyType="done"
+                   onSubmitEditing={saveTitle}
+               />
+               <Text style={s.headerDate}>{format(new Date(achat.dateAchat), 'dd MMMM yyyy', {locale: language === 'en' ? enUS : fr})}</Text>
            </View>
            
-           {/* Bouton Rappel */}
            <TouchableOpacity onPress={() => { setMode('date'); setShowDatePicker(true); }} style={[s.backBtn, { marginRight: 8 }]}>
               <Ionicons name="notifications-outline" size={22} color="#fff" />
            </TouchableOpacity>
@@ -266,7 +264,7 @@ export default function AchatDetails() {
             <View style={s.summaryRow}>
                 <View>
                     <Text style={s.summaryLabel}>{t('total_spent')}</Text>
-                    <Text style={[s.summaryValue, { color: activeTheme.primary }]}>{totalDepense.toLocaleString()} {currency}</Text>
+                    <Text style={[s.summaryValue, { color: activeTheme.primary }]}>{formatMoney(totalDepense)} {currency}</Text>
                 </View>
                 <View style={[s.iconBox, { backgroundColor: activeTheme.secondary }]}>
                     <Ionicons name="wallet-outline" size={24} color={activeTheme.primary} />
@@ -284,91 +282,99 @@ export default function AchatDetails() {
          </View>
       </View>
 
-      <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
-         
-         {/* LISTE À ACHETER */}
-         <View style={s.section}>
-             <Text style={s.sectionTitle}>{t('to_buy')} ({unchecked.length})</Text>
-             {unchecked.map((item) => {
-                 const idx = lignes.indexOf(item);
-                 return (
-                     <View key={item.id} style={s.todoItem}>
-                        <TouchableOpacity onPress={() => toggle(item)} style={[s.checkBox, { borderColor: activeTheme.primary }]} />
-                        
-                        {editNameIdx === idx ? (
-                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                                <TextInput style={[s.inlineInput, { borderBottomColor: activeTheme.primary, color: s.text.color }]} value={editNameValue} onChangeText={setEditNameValue} autoFocus onSubmitEditing={saveRename} />
-                                <Ionicons name="checkmark" size={20} color={activeTheme.primary} onPress={saveRename} />
-                            </View>
-                        ) : (
-                            <TouchableOpacity style={{ flex: 1 }} onPress={() => { setEditNameIdx(idx); setEditNameValue(item.libelleProduit); }}>
-                                <Text style={s.itemText}>{item.libelleProduit}</Text>
-                            </TouchableOpacity>
-                        )}
-                        
-                        <TouchableOpacity onPress={() => askDelete(item)} style={s.miniDeleteBtn}>
-                            <Ionicons name="close" size={16} color="#fff" />
-                        </TouchableOpacity>
-                     </View>
-                 );
-             })}
+      {/* 👇 MODIFICATION : Ajout de KeyboardAvoidingView pour le problème du clavier */}
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0} // Ajustement pour iOS si besoin
+      >
+        <ScrollView 
+          ref={scrollViewRef}
+          contentContainerStyle={[s.scrollContent, { paddingBottom: 150 }]} // 👇 Augmentation du padding bas
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled" // Permet de taper sur les boutons même clavier ouvert
+        >
+          
+          {/* LISTE À ACHETER */}
+          <View style={s.section}>
+              <Text style={s.sectionTitle}>{t('to_buy')} ({unchecked.length})</Text>
+              {unchecked.map((item) => {
+                  const idx = lignes.indexOf(item);
+                  return (
+                      <View key={item.id} style={s.todoItem}>
+                          <TouchableOpacity onPress={() => toggle(item)} style={[s.checkBox, { borderColor: activeTheme.primary }]} />
+                          
+                          {editNameIdx === idx ? (
+                              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                                  <TextInput style={[s.inlineInput, { borderBottomColor: activeTheme.primary, color: s.text.color }]} value={editNameValue} onChangeText={setEditNameValue} autoFocus onSubmitEditing={saveRename} />
+                                  <Ionicons name="checkmark" size={20} color={activeTheme.primary} onPress={saveRename} />
+                              </View>
+                          ) : (
+                              <TouchableOpacity style={{ flex: 1 }} onPress={() => { setEditNameIdx(idx); setEditNameValue(item.libelleProduit); }}>
+                                  <Text style={s.itemText}>{item.libelleProduit}</Text>
+                              </TouchableOpacity>
+                          )}
+                          
+                          <TouchableOpacity onPress={() => askDelete(item)} style={s.miniDeleteBtn}>
+                              <Ionicons name="close" size={16} color="#fff" />
+                          </TouchableOpacity>
+                      </View>
+                  );
+              })}
 
-             {/* BARRE D'AJOUT */}
-             <Text style={[s.label, { marginLeft: 4, marginBottom: 4 }]}>Nom de l'article</Text>
-             <View style={[s.addItemRow, { borderColor: activeTheme.primary }]}>
-                <Ionicons name="add" size={24} color={activeTheme.primary} />
-                <TextInput 
-                    style={s.addItemInput} placeholder={t('add_item_placeholder')} placeholderTextColor={s.textSec.color}
-                    value={newItem} onChangeText={setNewItem} onSubmitEditing={addItem}
-                />
-                {newItem.length > 0 && (
-                    <TouchableOpacity onPress={addItem}><Text style={[s.addBtnText, { color: activeTheme.primary }]}>{t('ok')}</Text></TouchableOpacity>
-                )}
-             </View>
-         </View>
+              {/* BARRE D'AJOUT */}
+              <View style={[s.addItemRow, { borderColor: activeTheme.primary }]}>
+                  <Ionicons name="add" size={24} color={activeTheme.primary} />
+                  <TextInput 
+                      style={s.addItemInput} 
+                      placeholder={t('add_product_placeholder')} 
+                      placeholderTextColor={s.textSec.color}
+                      value={newItem} 
+                      onChangeText={setNewItem} 
+                      onSubmitEditing={addItem}
+                      blurOnSubmit={false} // Garde le clavier ouvert pour ajouter plusieurs items
+                  />
+                  {newItem.length > 0 && (
+                      <TouchableOpacity onPress={addItem}><Text style={[s.addBtnText, { color: activeTheme.primary }]}>{t('ok')}</Text></TouchableOpacity>
+                  )}
+              </View>
+          </View>
 
-         {/* LISTE ACHETÉS */}
-         {checked.length > 0 && (
-             <View style={s.section}>
-                 <Text style={s.sectionTitle}>{t('already_bought')} ({checked.length})</Text>
-                 {checked.map((item) => {
-                     const idx = lignes.indexOf(item);
-                     return (
-                         <View key={item.id} style={s.doneItem}>
-                             <View style={s.doneHeader}>
-                                 <TouchableOpacity onPress={() => toggle(item)}>
-                                     <Ionicons name="checkmark-circle" size={22} color={s.success.color} />
-                                 </TouchableOpacity>
-                                 <Text style={s.doneText} numberOfLines={1}>{item.libelleProduit}</Text>
-                                 <Text style={[s.doneTotal, { color: activeTheme.primary }]}>{item.prixTotal.toLocaleString()} {currency}</Text>
-                             </View>
-                             
-                             <View style={s.doneFooter}>
-                                 <Text style={s.doneSub}>{item.quantite} {item.unite} x {item.prixUnitaire.toLocaleString()}</Text>
-                                 
-                                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                                    <TouchableOpacity 
-                                      style={[s.actionBtn, { backgroundColor: activeTheme.primary + '15' }]}
-                                      onPress={() => { setEditIdx(idx); setEditData({ nom: item.libelleProduit, qty: item.quantite.toString(), prix: item.prixUnitaire.toString(), unite: item.unite || 'pcs' }); setEditModal(true); }}
-                                    >
-                                        <Ionicons name="create-outline" size={16} color={activeTheme.primary} />
-                                    </TouchableOpacity>
-                                    <TouchableOpacity 
-                                      style={[s.actionBtn, { backgroundColor: s.dangerLight.backgroundColor }]}
-                                      onPress={() => askDelete(item)}
-                                    >
-                                        <Ionicons name="trash-outline" size={16} color={s.danger.color} />
-                                    </TouchableOpacity>
-                                 </View>
-                             </View>
-                         </View>
-                     );
-                 })}
-             </View>
-         )}
-      </ScrollView>
+          {/* LISTE ACHETÉS */}
+          {checked.length > 0 && (
+              <View style={s.section}>
+                  <Text style={s.sectionTitle}>{t('already_bought')} ({checked.length})</Text>
+                  {checked.map((item) => {
+                      const idx = lignes.indexOf(item);
+                      return (
+                          <View key={item.id} style={s.doneItem}>
+                              <View style={s.doneHeader}>
+                                  <TouchableOpacity onPress={() => toggle(item)}>
+                                      <Ionicons name="checkmark-circle" size={22} color={s.success.color} />
+                                  </TouchableOpacity>
+                                  <Text style={s.doneText} numberOfLines={1}>{item.libelleProduit}</Text>
+                                  <Text style={[s.doneTotal, { color: activeTheme.primary }]}>{formatMoney(item.prixTotal)} {currency}</Text>
+                              </View>
+                              <View style={s.doneFooter}>
+                                  <Text style={s.doneSub}>{item.quantite} {item.unite} x {formatMoney(item.prixUnitaire)}</Text>
+                                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                                      <TouchableOpacity style={[s.actionBtn, { backgroundColor: activeTheme.primary + '15' }]} onPress={() => { setEditIdx(idx); setEditData({ nom: item.libelleProduit, qty: item.quantite.toString(), prix: item.prixUnitaire.toString(), unite: item.unite || 'pcs' }); setEditModal(true); }}>
+                                          <Ionicons name="create-outline" size={16} color={activeTheme.primary} />
+                                      </TouchableOpacity>
+                                      <TouchableOpacity style={[s.actionBtn, { backgroundColor: s.dangerLight.backgroundColor }]} onPress={() => askDelete(item)}>
+                                          <Ionicons name="trash-outline" size={16} color={s.danger.color} />
+                                      </TouchableOpacity>
+                                  </View>
+                              </View>
+                          </View>
+                      );
+                  })}
+              </View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-      {/* DATE PICKER (Android/iOS) */}
+      {/* ... MODALES (DatePicker, Confirm, Edit, Quick) RESTENT INCHANGÉES ... */}
       {showDatePicker && (
         <DateTimePicker
           value={reminderDate}
@@ -378,8 +384,6 @@ export default function AchatDetails() {
           minimumDate={new Date()}
         />
       )}
-
-      {/* --- MODAL SUPPRESSION --- */}
       <ConfirmModal
         visible={deleteModal}
         title={t('delete_item_title')}
@@ -392,8 +396,6 @@ export default function AchatDetails() {
         theme={activeTheme}
         isDarkMode={isDarkMode}
       />
-
-      {/* --- MODAL EDITION --- */}
       <Modal visible={editModal} transparent animationType="fade">
          <View style={s.backdrop}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.modalContainer}>
@@ -403,10 +405,8 @@ export default function AchatDetails() {
                      <Ionicons name="close" size={24} color={s.textSec.color} />
                   </TouchableOpacity>
                </View>
-
                <Text style={s.label}>{t('product_name')}</Text>
                <TextInput style={s.inputBox} value={editData.nom} onChangeText={t => setEditData({...editData, nom: t})} placeholderTextColor={s.textSec.color} />
-               
                <View style={s.row}>
                    <View style={{ flex: 1.5 }}>
                        <Text style={s.label}>{t('quantity')}</Text>
@@ -417,45 +417,22 @@ export default function AchatDetails() {
                        <TextInput style={[s.inputBox, { backgroundColor: s.input.backgroundColor }]} value={editData.unite} onChangeText={t => setEditData({...editData, unite: t})} placeholder="pcs" placeholderTextColor={s.textSec.color} />
                    </View>
                </View>
-
                <Text style={s.label}>{t('unit_price')} ({currency})</Text>
                <TextInput style={s.inputBox} value={editData.prix} onChangeText={t => setEditData({...editData, prix: t})} keyboardType="numeric" placeholderTextColor={s.textSec.color} />
-
-               <TouchableOpacity 
-                  onPress={saveEdit} 
-                  activeOpacity={0.8} 
-                  style={{ 
-                      backgroundColor: activeTheme.primary, 
-                      marginTop: 25, 
-                      width: '100%', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      paddingVertical: 16, 
-                      borderRadius: 14, 
-                      shadowColor: activeTheme.primary, 
-                      shadowOffset: { width: 0, height: 4 }, 
-                      shadowOpacity: 0.3, 
-                      shadowRadius: 8, 
-                      elevation: 4 
-                  }}
-               >
+               <TouchableOpacity onPress={saveEdit} activeOpacity={0.8} style={{ backgroundColor: activeTheme.primary, marginTop: 25, width: '100%', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, shadowColor: activeTheme.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 }}>
                   <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 18 }}>Enregistrer</Text>
                </TouchableOpacity>
             </KeyboardAvoidingView>
          </View>
       </Modal>
-
-      {/* MODAL RAPIDE */}
       <Modal visible={quickModal} transparent animationType="fade">
          <View style={s.backdrop}>
             <View style={s.modalContainer}>
                <Text style={s.modalTitle}>{t('how_much')}</Text>
-               
                <Text style={s.label}>{t('product_name')}</Text>
                <View style={[s.inputBox, { justifyContent: 'center', opacity: 0.7 }]}>
                    <Text style={{ fontSize: 16, color: s.text.color, fontWeight: '600' }}>{quickData.nom}</Text>
                </View>
-
                <View style={s.row}>
                    <View style={s.halfInput}>
                        <Text style={s.label}>{t('quantity')}</Text>
@@ -468,7 +445,6 @@ export default function AchatDetails() {
                </View>
                <Text style={s.label}>{t('unit_price_short')} ({currency})</Text>
                <TextInput style={s.inputBox} value={quickData.prix} onChangeText={t => setQuickData({...quickData, prix: t})} keyboardType="numeric" placeholderTextColor={s.textSec.color} />
-               
                <View style={s.modalActions}>
                    <TouchableOpacity onPress={() => setQuickModal(false)} style={s.btnGhost}><Text style={{color: s.textSec.color}}>{t('cancel')}</Text></TouchableOpacity>
                    <TouchableOpacity onPress={saveQuick} style={[s.btnPrimary, { backgroundColor: activeTheme.primary }]}><Text style={{color:'#fff'}}>{t('validate')}</Text></TouchableOpacity>
@@ -489,6 +465,7 @@ const styles = (c: any) => StyleSheet.create({
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
   titleInput: { fontSize: 20, fontWeight: 'bold', color: '#fff', borderBottomWidth: 1, borderColor: '#fff' },
+  titleInputSimple: { fontSize: 20, fontWeight: 'bold', color: '#fff', paddingVertical: 2 },
   headerDate: { fontSize: 12, color: 'rgba(255,255,255,0.8)' },
   summaryContainer: { marginTop: -40, paddingHorizontal: 20, marginBottom: 10 },
   summaryCard: { backgroundColor: c.card, borderRadius: 20, padding: 20, elevation: 5, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10 },

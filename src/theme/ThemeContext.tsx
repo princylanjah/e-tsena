@@ -79,15 +79,17 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     return styleBuilder(colors);
   };
 
+  const value = React.useMemo(() => ({
+    currentTheme,
+    setTheme: changeTheme,
+    activeTheme: THEMES[currentTheme],
+    isDarkMode,
+    toggleDarkMode,
+    getStyles
+  }), [currentTheme, isDarkMode]);
+
   return (
-    <ThemeContext.Provider value={{
-      currentTheme,
-      setTheme: changeTheme,
-      activeTheme: THEMES[currentTheme],
-      isDarkMode,
-      toggleDarkMode,
-      getStyles
-    }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

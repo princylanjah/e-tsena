@@ -1,9 +1,9 @@
 import React from 'react';
-import { ScrollView, View, Text, StyleSheet, TouchableOpacity, Switch, StatusBar } from 'react-native';
+import { ScrollView, View, Text, StyleSheet, TouchableOpacity, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useTheme, THEMES, ThemeKey } from '../context/ThemeContext';
+import { useTheme, THEMES, ThemeKey } from '../../src/context/ThemeContext';
 import { useSettings } from '../../src/context/SettingsContext';
 import { router } from 'expo-router';
 
@@ -15,14 +15,26 @@ export default function ThemeSelectorPage() {
 
   return (
     <View style={s.container}>
-      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={s.container.backgroundColor} />
       
       {/* Header */}
       <View style={[s.header, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={s.text.color} />
+        {/* FIL D'ARIANE */}
+        <TouchableOpacity 
+          onPress={() => router.push('/')} 
+          style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, opacity: 0.7 }}
+        >
+          <Ionicons name="home-outline" size={14} color={isDarkMode ? '#94A3B8' : '#6B7280'} />
+          <Text style={{ color: isDarkMode ? '#94A3B8' : '#6B7280', fontSize: 11, marginLeft: 4 }}>{t('home')}</Text>
+          <Ionicons name="chevron-forward" size={12} color={isDarkMode ? '#94A3B8' : '#6B7280'} style={{ marginHorizontal: 3 }} />
+          <Text style={{ color: activeTheme.primary, fontSize: 11, fontWeight: 'bold' }}>{t('customization')}</Text>
         </TouchableOpacity>
-        <Text style={s.title}>{t('customization')}</Text>
+        
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={s.text.color} />
+          </TouchableOpacity>
+          <Text style={s.title}>{t('customization')}</Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={s.content}>

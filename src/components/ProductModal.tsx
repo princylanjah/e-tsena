@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SECTION_COLORS } from '@constants/colors';
+import formatMoney from '../utils/formatMoney';
 
 interface Produit {
   id: number;
@@ -148,7 +149,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             <View style={styles.totalPreview}>
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>
-                {total.toLocaleString()} Ar
+                {formatMoney(total)} Ar
               </Text>
             </View>
           )}

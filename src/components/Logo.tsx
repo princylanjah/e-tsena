@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Animated, Easing } from 'react-native';
-import Svg, { Path, Defs, LinearGradient, Stop, Circle, G } from 'react-native-svg';
+import Svg, { Path, Defs, LinearGradient, Stop, Circle, G, Rect } from 'react-native-svg';
 
 interface LogoProps {
   size?: number;
@@ -46,34 +46,53 @@ export const Logo = ({ size = 44, colors = ['#FF5722', '#FF9800'], animated = fa
             <Stop offset="0" stopColor={c1} />
             <Stop offset="1" stopColor={c2} />
           </LinearGradient>
+          <LinearGradient id="gradLight" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor="#fff" stopOpacity="0.9" />
+            <Stop offset="1" stopColor="#fff" stopOpacity="0.6" />
+          </LinearGradient>
         </Defs>
         
         <G>
-           {/* Structure principale (Poignée + Support) */}
-           <Path 
-             d="M15 25 C 25 22, 32 35, 35 50 Q 38 75, 60 78 L 85 75" 
-             stroke="url(#grad)" 
-             strokeWidth="8" 
-             strokeLinecap="round"
-             fill="none"
-           />
-
-           {/* Corps du panier (Forme pleine) */}
-           <Path
-             d="M38 35 L 92 28 L 86 68 C 86 68, 85 72, 60 72 L 42 72 L 38 35 Z"
-             fill="url(#grad)"
-           />
-           
-           {/* Swoosh (La courbe blanche dynamique) */}
-           <Path 
-             d="M 45 68 Q 65 65, 88 32 L 92 28 L 92 50 Q 75 75, 48 72 Z" 
-             fill="#fff" 
-             opacity="0.9"
-           />
-           
-           {/* Roues */}
-           <Circle cx="50" cy="88" r="8" fill="url(#grad)" />
-           <Circle cx="80" cy="85" r="8" fill="url(#grad)" />
+          {/* Background Circle - subtle */}
+          <Circle cx="50" cy="50" r="48" fill="url(#grad)" opacity="0.1" />
+          
+          {/* Panier moderne - corps principal */}
+          <Path
+            d="M22 35 L78 35 L72 70 C72 74 68 78 64 78 L36 78 C32 78 28 74 28 70 L22 35 Z"
+            fill="url(#grad)"
+          />
+          
+          {/* Poignée élégante */}
+          <Path 
+            d="M35 35 C35 22, 45 15, 50 15 C55 15, 65 22, 65 35" 
+            stroke="url(#grad)" 
+            strokeWidth="5" 
+            strokeLinecap="round"
+            fill="none"
+          />
+          
+          {/* Reflet blanc - effet 3D */}
+          <Path 
+            d="M26 40 L74 40 L70 65 C70 68, 67 70, 64 70 L58 70 L62 45 L30 45 L26 40 Z" 
+            fill="url(#gradLight)" 
+            opacity="0.5"
+          />
+          
+          {/* Lignes horizontales - détails panier */}
+          <Path d="M25 48 L75 48" stroke="#fff" strokeWidth="2" opacity="0.3" />
+          <Path d="M27 58 L73 58" stroke="#fff" strokeWidth="2" opacity="0.25" />
+          <Path d="M29 68 L71 68" stroke="#fff" strokeWidth="2" opacity="0.2" />
+          
+          {/* Petit accent - checkmark subtil */}
+          <Circle cx="50" cy="55" r="12" fill="#fff" opacity="0.2" />
+          <Path 
+            d="M44 55 L48 59 L56 51" 
+            stroke="#fff" 
+            strokeWidth="3" 
+            strokeLinecap="round" 
+            strokeLinejoin="round"
+            fill="none"
+          />
         </G>
       </Svg>
     </AnimatedView>

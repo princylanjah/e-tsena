@@ -1,23 +1,28 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { 
   View, Text, ScrollView, Dimensions, TouchableOpacity, StyleSheet, 
-  Animated, Modal, StatusBar, ActivityIndicator, Platform, FlatList
+  Animated, Modal, ActivityIndicator, Alert, FlatList
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PieChart } from 'react-native-chart-kit';
-import { getDb } from '../../src/db/init';
+import { DepenseService } from '../../src/services/depenseService';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths, startOfYear, endOfYear } from 'date-fns';
+import formatMoney from '../../src/utils/formatMoney';
 import { fr, enUS } from 'date-fns/locale';
 import { router, useFocusEffect } from 'expo-router';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
-import { useTheme } from '../context/ThemeContext';
+import { useTheme } from '../../src/context/ThemeContext';
+import { ThemedStatusBar } from '../../src/components/ThemedStatusBar';
 import { useSettings } from '../../src/context/SettingsContext';
+import JournalModal from '../../src/components/JournalModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Using centralized formatMoney util
 
 // --- TYPES ---
 interface ChartData {
@@ -113,40 +118,26 @@ export default function StatsScreen() {
     outputRange: ['-30deg', '0deg']
   });
 
-  const loadAllData = () => {
-    const db = getDb();
+  const loadAllData = async () => {
     try {
       // 1. TOTAL GLOBAL (Tout temps)
-      const resGlobal = db.getAllSync(`SELECT COALESCE(SUM(prixTotal), 0) as t FROM LigneAchat`);
-      const tGlobal = (resGlobal[0] as any)?.t || 0;
+      const tGlobal = await DepenseService.calculerTotalGlobal();
       setTotalGlobal(tGlobal);
 
       // 2. TOTAL CETTE ANNÉE (Pour vérification cohérence)
       const startY = format(startOfYear(new Date()), 'yyyy-MM-dd');
       const endY = format(endOfYear(new Date()), 'yyyy-MM-dd');
-      const resYear = db.getAllSync(`
-        SELECT COALESCE(SUM(l.prixTotal), 0) as t 
-        FROM LigneAchat l JOIN Achat a ON a.id = l.idAchat 
-        WHERE DATE(a.dateAchat) BETWEEN ? AND ?
-      `, [startY, endY]);
-      setTotalYear((resYear[0] as any)?.t || 0);
+      const tYear = await DepenseService.getTotalSurPeriode(startY, endY);
+      setTotalYear(tYear);
 
       // 3. TOTAL CE MOIS (Pour alignement avec Accueil)
       const startM = format(startOfMonth(new Date()), 'yyyy-MM-dd');
       const endM = format(endOfMonth(new Date()), 'yyyy-MM-dd');
-      const resMonth = db.getAllSync(`
-        SELECT COALESCE(SUM(l.prixTotal), 0) as t 
-        FROM LigneAchat l JOIN Achat a ON a.id = l.idAchat 
-        WHERE DATE(a.dateAchat) BETWEEN ? AND ?
-      `, [startM, endM]);
-      setTotalMonth((resMonth[0] as any)?.t || 0);
+      const tMonth = await DepenseService.getTotalSurPeriode(startM, endM);
+      setTotalMonth(tMonth);
 
       // 5. Répartition Catégorie (Global) - TOUS LES PRODUITS
-      const allRows = db.getAllSync(`
-        SELECT l.libelleProduit as name, SUM(l.prixTotal) as montant
-        FROM LigneAchat l
-        GROUP BY l.libelleProduit ORDER BY montant DESC
-      `) as { name: string; montant: number }[];
+      const allRows = await DepenseService.getRepartitionParProduit();
       
       setAllProducts(allRows);
       
@@ -160,22 +151,32 @@ export default function StatsScreen() {
       }
 
       // 5. Chargement Comparatifs
-      loadComparative(db);
+      await loadComparative();
 
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { 
+      console.error(e); 
+      Alert.alert(t('error'), t('error_loading_stats'));
+    } finally { setLoading(false); }
   };
+
+  // Total filtré pour les pourcentages
+  const [filteredTotal, setFilteredTotal] = useState(0);
 
   const updateChartData = (products: { name: string; montant: number }[], selection: string[]) => {
     const filteredRows = products.filter(p => selection.includes(p.name));
     
-    // Génération de couleurs compatibles avec le thème
+    // Calculer le total filtré pour les pourcentages
+    const total = filteredRows.reduce((sum, p) => sum + p.montant, 0);
+    setFilteredTotal(total);
+    
+    // Génération de couleurs PRO - bien contrastées
     const generateThemeColors = (count: number) => {
       const basePalette = [
         activeTheme.primary,
         activeTheme.secondary,
-        '#FFB74D', '#4DB6AC', '#BA68C8', '#F06292', '#64B5F6', '#81C784',
-        '#FF8A65', '#A1887F', '#90A4AE', '#E57373', '#7986CB', '#4DD0E1',
-        '#AED581', '#DCE775', '#FFD54F', '#4FC3F7', '#9575CD', '#FF8A80'
+        '#E53935', '#8E24AA', '#1E88E5', '#43A047', '#FB8C00', '#00897B',
+        '#D81B60', '#5E35B1', '#039BE5', '#00ACC1', '#7CB342', '#C0CA33',
+        '#3949AB', '#00838F', '#6D4C41', '#546E7A', '#F4511E', '#757575'
       ];
 
       const colors = [];
@@ -226,7 +227,7 @@ export default function StatsScreen() {
     }
   };
 
-  const loadComparative = (db: any) => {
+  const loadComparative = async () => {
     // SEMAINE (4 dernières)
     const weeks: ComparativeData[] = [];
     for (let i = 0; i < 4; i++) {
@@ -235,17 +236,14 @@ export default function StatsScreen() {
       const sStr = format(ws, 'yyyy-MM-dd');
       const eStr = format(we, 'yyyy-MM-dd');
 
-      const res = db.getAllSync(`
-         SELECT COALESCE(SUM(l.prixTotal), 0) as montant, COUNT(DISTINCT a.id) as nb
-         FROM Achat a JOIN LigneAchat l ON a.id = l.idAchat
-         WHERE DATE(a.dateAchat) BETWEEN ? AND ?`, [sStr, eStr]);
+      const stats = await DepenseService.getStatsComparatives(sStr, eStr);
       
       weeks.push({
         id: `w-${i}`,
         period: `Sem. ${format(ws, 'dd/MM')}`,
         fullLabel: `Semaine du ${format(ws, 'dd MMM', { locale: language === 'en' ? enUS : fr })} au ${format(we, 'dd MMM', { locale: language === 'en' ? enUS : fr })}`,
-        montant: (res[0] as any)?.montant || 0,
-        nbAchats: (res[0] as any)?.nb || 0,
+        montant: stats.montant,
+        nbAchats: stats.nbAchats,
         startDate: sStr,
         endDate: eStr
       });
@@ -261,17 +259,14 @@ export default function StatsScreen() {
       const sStr = format(ms, 'yyyy-MM-dd');
       const eStr = format(me, 'yyyy-MM-dd');
 
-      const res = db.getAllSync(`
-         SELECT COALESCE(SUM(l.prixTotal), 0) as montant, COUNT(DISTINCT a.id) as nb
-         FROM Achat a JOIN LigneAchat l ON a.id = l.idAchat
-         WHERE DATE(a.dateAchat) BETWEEN ? AND ?`, [sStr, eStr]);
+      const stats = await DepenseService.getStatsComparatives(sStr, eStr);
       
       months.push({
         id: `m-${i}`,
         period: format(ms, 'MMMM', { locale: language === 'en' ? enUS : fr }),
         fullLabel: format(ms, 'MMMM yyyy', { locale: language === 'en' ? enUS : fr }),
-        montant: (res[0] as any)?.montant || 0,
-        nbAchats: (res[0] as any)?.nb || 0,
+        montant: stats.montant,
+        nbAchats: stats.nbAchats,
         startDate: sStr,
         endDate: eStr
       });
@@ -280,55 +275,17 @@ export default function StatsScreen() {
   };
 
   // OUVRIR LA MODAL DE DÉTAIL (PAR PRODUIT)
-  const openDetailModal = (item: ComparativeData) => {
+  const openDetailModal = async (item: ComparativeData) => {
     setSelectedPeriod(item);
     try {
-      const db = getDb();
       // Récupérer les produits groupés par nom pour la période sélectionnée
-      const res = db.getAllSync(`
-        SELECT l.libelleProduit, SUM(l.quantite) as totalQte, SUM(l.prixTotal) as totalPrix
-        FROM LigneAchat l 
-        JOIN Achat a ON a.id = l.idAchat 
-        WHERE DATE(a.dateAchat) BETWEEN ? AND ?
-        GROUP BY l.libelleProduit
-        ORDER BY totalPrix DESC
-      `, [item.startDate, item.endDate]);
+      console.log('[JOURNAL] Période:', item.startDate, '->', item.endDate);
+      const res = await DepenseService.getDetailsProduitsSurPeriode(item.startDate, item.endDate);
+      console.log('[JOURNAL] Produits trouvés:', res.length, res);
       
       setJournalData(res as ProductEntry[]);
       setShowDetailModal(true);
-    } catch (e) { console.error(e); }
-  };
-
-  // EXPORT PDF DEPUIS LA MODAL
-  const exportPDF = async () => {
-    if (!selectedPeriod || journalData.length === 0) return;
-    try {
-      const html = `
-        <html>
-          <body style="font-family: Helvetica; padding: 20px;">
-            <h1 style="text-align: center; color: ${activeTheme.primary};">${selectedPeriod.fullLabel}</h1>
-            <h3 style="text-align: center; color: #666;">Rapport de Produits</h3>
-            <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-              <tr style="background-color: ${activeTheme.primary}; color: white;">
-                <th style="padding: 10px; text-align: left;">Produit</th>
-                <th style="padding: 10px; text-align: center;">Quantité</th>
-                <th style="padding: 10px; text-align: right;">Montant Total</th>
-              </tr>
-              ${journalData.map(j => `
-                <tr style="border-bottom: 1px solid #ddd;">
-                  <td style="padding: 10px;">${j.libelleProduit}</td>
-                  <td style="padding: 10px; text-align: center;">${j.totalQte}</td>
-                  <td style="padding: 10px; text-align: right;">${j.totalPrix.toLocaleString()} ${currency}</td>
-                </tr>
-              `).join('')}
-            </table>
-            <h2 style="text-align: right; margin-top: 20px; color: ${activeTheme.primary};">Total: ${selectedPeriod.montant.toLocaleString()} ${currency}</h2>
-          </body>
-        </html>
-      `;
-      const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-    } catch (e) { Alert.alert(t('error'), t('pdf_export_failed')); }
+    } catch (e) { console.error('[JOURNAL] Erreur:', e); }
   };
 
   // --- RENDER BARRE ---
@@ -342,7 +299,7 @@ export default function StatsScreen() {
       >
         <View style={s.progressHeader}>
           <Text style={s.progressLabel}>{item.period}</Text>
-          <Text style={s.progressValue}>{item.montant.toLocaleString()} {currency}</Text>
+          <Text style={s.progressValue}>{formatMoney(item.montant)} {currency}</Text>
         </View>
         <View style={s.track}>
           <LinearGradient
@@ -363,10 +320,23 @@ export default function StatsScreen() {
 
   return (
     <View style={s.container}>
-      <StatusBar barStyle="light-content" />
+      <ThemedStatusBar transparent />
       
       {/* HEADER */}
       <LinearGradient colors={activeTheme.gradient as any} style={[s.header, { paddingTop: insets.top + 10 }]}>
+        {/* FIL D'ARIANE */}
+        <TouchableOpacity 
+          onPress={() => router.push('/')} 
+          style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, opacity: 0.9 }}
+        >
+          <Ionicons name="home-outline" size={16} color="rgba(255,255,255,0.8)" />
+          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, marginLeft: 5 }}>{t('home')}</Text>
+          <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.8)" style={{ marginHorizontal: 4 }} />
+          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>{t('reports')}</Text>
+          <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.8)" style={{ marginHorizontal: 4 }} />
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{t('statistics')}</Text>
+        </TouchableOpacity>
+
         <View style={s.headerTop}>
           <TouchableOpacity onPress={() => router.push('/rapports')} style={s.iconBtn}>
             <Ionicons name="arrow-back" size={24} color="white" />
@@ -380,12 +350,12 @@ export default function StatsScreen() {
         <View style={s.summaryRow}>
           <View style={s.summaryItem}>
             <Text style={s.summaryLabel}>{t('total_spent_month')}</Text>
-            <Text style={[s.summaryValue, { color: activeTheme.primary }]}>{totalMonth.toLocaleString()} {currency}</Text>
+            <Text style={[s.summaryValue, { color: activeTheme.primary }]}>{formatMoney(totalMonth)} {currency}</Text>
           </View>
           <View style={s.verticalDivider} />
           <View style={s.summaryItem}>
             <Text style={s.summaryLabel}>{t('total_year')} {new Date().getFullYear()}</Text>
-            <Text style={[s.summaryValue, { color: activeTheme.primary }]}>{totalYear.toLocaleString()} {currency}</Text>
+            <Text style={[s.summaryValue, { color: activeTheme.primary }]}>{formatMoney(totalYear)} {currency}</Text>
           </View>
         </View>
       </LinearGradient>
@@ -415,51 +385,72 @@ export default function StatsScreen() {
         {/* VUE : RÉPARTITION */}
         {viewMode === 'repartition' && (
           <View style={s.card}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-               <Text style={s.cardTitle}>{t('distribution')}</Text>
-               <TouchableOpacity onPress={() => setShowAllProductsModal(true)}>
-                  <Text style={{ color: activeTheme.primary, fontWeight: '600' }}>{t('filter')}</Text>
+            {/* HEADER */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+               <View>
+                 <Text style={s.cardTitle}>{t('distribution')}</Text>
+                 <Text style={{ fontSize: 12, color: isDarkMode ? '#94A3B8' : '#9CA3AF', marginTop: 2 }}>{data.length} {t('products')}</Text>
+               </View>
+               <TouchableOpacity onPress={() => setShowAllProductsModal(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: activeTheme.primary + '15', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 }}>
+                  <Ionicons name="options-outline" size={16} color={activeTheme.primary} />
+                  <Text style={{ color: activeTheme.primary, fontWeight: '600', fontSize: 13 }}>{t('filter')}</Text>
                </TouchableOpacity>
             </View>
             
-            <Animated.View style={[s.chartWrapper, { transform: [{ scale: scaleChart }, { rotate: spin }] }]}>
-              <PieChart
-                data={data}
-                width={SCREEN_WIDTH - 40}
-                height={260}
-                chartConfig={{ color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})` }}
-                accessor="population"
-                backgroundColor="transparent"
-                paddingLeft={(SCREEN_WIDTH / 4).toString()}
-                absolute
-                hasLegend={false}
-              />
-            </Animated.View>
-
-            <View style={s.legendContainer}>
-              {data.map((item, index) => (
-                <View key={item.name || index} style={s.legendItem}>
-                  <View style={s.legendLeft}>
-                    <View style={[s.dot, { backgroundColor: item.color }]} />
-                    <View>
-                        <Text style={s.legendName} numberOfLines={1}>{item.name}</Text>
-                        <Text style={{ fontSize: 10, color: '#999' }}>{item.population.toLocaleString()} {currency}</Text>
-                    </View>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={s.legendValue}>
-                        {totalGlobal > 0 ? `${Math.round((item.population / totalGlobal) * 100)}%` : '0%'}
-                    </Text>
-                  </View>
-                </View>
-              ))}
+            {/* CAMEMBERT PRO - CENTRÉ */}
+            <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 15 }}>
+              <Animated.View style={[{ transform: [{ scale: scaleChart }, { rotate: spin }] }]}>
+                <PieChart
+                  data={data}
+                  width={SCREEN_WIDTH - 60}
+                  height={260}
+                  chartConfig={{ 
+                    color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+                  }}
+                  accessor="population"
+                  backgroundColor="transparent"
+                  paddingLeft="0"
+                  absolute={false}
+                  hasLegend={false}
+                  center={[(SCREEN_WIDTH - 60) / 4, 0]}
+                />
+              </Animated.View>
             </View>
             
+            {/* TOTAL AFFICHÉ EN DESSOUS */}
+            <View style={{ alignItems: 'center', marginBottom: 10, paddingVertical: 12, backgroundColor: isDarkMode ? '#1E293B' : '#F0F9FF', borderRadius: 12 }}>
+              <Text style={{ fontSize: 12, color: isDarkMode ? '#94A3B8' : '#6B7280', fontWeight: '600' }}>{t('total')}</Text>
+              <Text style={{ fontSize: 24, fontWeight: 'bold', color: activeTheme.primary }}>{formatMoney(filteredTotal)} {currency}</Text>
+            </View>
+
+            {/* LÉGENDE PRO */}
+            <View style={s.legendContainerPro}>
+              {data.map((item, index) => {
+                const percent = filteredTotal > 0 ? Math.round((item.population / filteredTotal) * 100) : 0;
+                return (
+                  <View key={item.name || index} style={s.legendItemPro}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                      <View style={[s.colorBar, { backgroundColor: item.color }]} />
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={s.legendNamePro} numberOfLines={1}>{item.name}</Text>
+                        <Text style={s.legendAmountPro}>{formatMoney(item.population)} {currency}</Text>
+                      </View>
+                    </View>
+                    <View style={[s.percentBadgePro, { backgroundColor: item.color }]}>
+                      <Text style={s.percentTextPro}>{percent}%</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+            
+            {/* BOUTON GÉRER */}
             <TouchableOpacity 
-              style={{ marginTop: 15, alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderColor: isDarkMode ? '#334155' : '#f0f0f0' }}
+              style={{ marginTop: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, backgroundColor: activeTheme.primary, borderRadius: 14, gap: 8 }}
               onPress={() => setShowAllProductsModal(true)}
             >
-              <Text style={{ color: activeTheme.primary, fontWeight: 'bold', fontSize: 14 }}>{t('manage_display')}</Text>
+              <Ionicons name="pie-chart-outline" size={18} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('manage_display')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -481,93 +472,78 @@ export default function StatsScreen() {
       </Animated.ScrollView>
 
       {/* --- MODAL DÉTAIL (JOURNAL) --- */}
-      <Modal visible={showDetailModal} animationType="slide" presentationStyle="pageSheet">
-         <View style={s.modalContainer}>
-            <View style={s.modalHeader}>
-               <Text style={s.modalTitle}>{selectedPeriod?.fullLabel}</Text>
-               <TouchableOpacity onPress={() => setShowDetailModal(false)} style={s.modalCloseBtn}>
-                  <Ionicons name="close" size={24} color="#666" />
-               </TouchableOpacity>
-            </View>
+      <JournalModal
+        visible={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+        selectedPeriod={selectedPeriod}
+        journalData={journalData}
+        activeTheme={activeTheme}
+        isDarkMode={isDarkMode}
+        currency={currency}
+        t={t}
+      />
 
-            <View style={s.modalSummary}>
-               <View>
-                  <Text style={s.modalLabel}>{t('total_period')}</Text>
-                  <Text style={[s.modalTotal, { color: activeTheme.primary }]}>{selectedPeriod?.montant.toLocaleString()} {currency}</Text>
+      {/* --- MODAL FILTRE PRODUITS - PRO --- */}
+      <Modal 
+         visible={showAllProductsModal} 
+         animationType="slide" 
+         presentationStyle="pageSheet"
+         onRequestClose={() => setShowAllProductsModal(false)}
+      >
+         <View style={{ flex: 1, backgroundColor: isDarkMode ? '#0F172A' : '#fff' }}>
+            {/* HEADER */}
+            <View style={{ paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, backgroundColor: isDarkMode ? '#1E293B' : '#fff', borderBottomWidth: 1, borderBottomColor: isDarkMode ? '#334155' : '#F1F5F9' }}>
+               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <TouchableOpacity onPress={() => setShowAllProductsModal(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                     <Ionicons name="arrow-back" size={24} color={activeTheme.primary} />
+                     <Text style={{ fontSize: 16, fontWeight: '600', color: activeTheme.primary }}>{t('back')}</Text>
+                  </TouchableOpacity>
+                  <View style={{ backgroundColor: activeTheme.primary + '15', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 }}>
+                     <Text style={{ color: activeTheme.primary, fontWeight: '700', fontSize: 14 }}>{selectedProducts.length}/{allProducts.length}</Text>
+                  </View>
                </View>
-               <TouchableOpacity style={[s.btnPdf, { borderColor: activeTheme.primary }]} onPress={exportPDF}>
-                  <Ionicons name="share-outline" size={20} color={activeTheme.primary} />
-                  <Text style={{ color: activeTheme.primary, fontWeight: 'bold', marginLeft: 5 }}>PDF</Text>
-               </TouchableOpacity>
-            </View>
-
-            <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-               {journalData.length === 0 ? (
-                  <Text style={s.emptyText}>{t('no_product_bought')}</Text>
-               ) : (
-                  journalData.map((item, index) => (
-                     <View key={item.libelleProduit || index} style={s.journalRow}>
-                        <View style={s.journalLeft}>
-                           <View style={[s.dateBadge, { backgroundColor: activeTheme.secondary + '20' }]}>
-                              <Ionicons name="cube-outline" size={20} color={activeTheme.primary} />
-                           </View>
-                           <View>
-                              <Text style={s.journalName}>{item.libelleProduit}</Text>
-                              <Text style={s.journalSub}>Qté: {item.totalQte}</Text>
-                           </View>
-                        </View>
-                        <Text style={s.journalPrice}>{item.totalPrix.toLocaleString()} {currency}</Text>
-                     </View>
-                  ))
-               )}
-            </ScrollView>
-         </View>
-      </Modal>
-
-      {/* --- MODAL TOUS LES PRODUITS (FILTRE) --- */}
-      <Modal visible={showAllProductsModal} animationType="slide" presentationStyle="pageSheet">
-         <View style={s.modalContainer}>
-            <View style={s.modalHeader}>
-               <Text style={s.modalTitle}>{t('manage_display')}</Text>
-               <TouchableOpacity onPress={() => setShowAllProductsModal(false)} style={s.modalCloseBtn}>
-                  <Ionicons name="close" size={24} color="#666" />
-               </TouchableOpacity>
-            </View>
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
-               <TouchableOpacity onPress={toggleAllProducts}>
-                  <Text style={{ color: activeTheme.primary, fontWeight: 'bold' }}>
+               
+               {/* TITRE */}
+               <View style={{ marginTop: 20 }}>
+                  <Text style={{ fontSize: 20, fontWeight: '800', color: isDarkMode ? '#F1F5F9' : '#1F2937' }}>{t('manage_display')}</Text>
+                  <Text style={{ fontSize: 13, color: isDarkMode ? '#64748B' : '#9CA3AF', marginTop: 4 }}>{t('filter')}</Text>
+               </View>
+               
+               {/* ACTION TOUT SÉLECTIONNER */}
+               <TouchableOpacity onPress={toggleAllProducts} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, backgroundColor: isDarkMode ? '#0F172A' : '#F8FAFC', padding: 14, borderRadius: 12 }}>
+                  <Ionicons name={selectedProducts.length === allProducts.length ? "checkbox" : "square-outline"} size={24} color={activeTheme.primary} />
+                  <Text style={{ color: activeTheme.primary, fontWeight: '600', fontSize: 15 }}>
                      {selectedProducts.length === allProducts.length ? t('deselect_all') : t('select_all')}
                   </Text>
                </TouchableOpacity>
-               <Text style={{ color: '#999' }}>{selectedProducts.length} {t('selected')}</Text>
             </View>
 
+            {/* LISTE DES PRODUITS */}
             <FlatList
                data={allProducts}
                keyExtractor={(item, index) => index.toString()}
-               contentContainerStyle={{ paddingBottom: 40 }}
+               contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+               showsVerticalScrollIndicator={false}
                renderItem={({ item, index }) => {
                   const isSelected = selectedProducts.includes(item.name);
+                  const totalAll = allProducts.reduce((s, p) => s + p.montant, 0);
+                  const percent = totalAll > 0 ? ((item.montant / totalAll) * 100).toFixed(1) : '0';
                   return (
                      <TouchableOpacity 
-                        style={s.journalRow} 
+                        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', padding: 16, borderRadius: 14, marginBottom: 10, borderWidth: 2, borderColor: isSelected ? activeTheme.primary : 'transparent' }} 
                         onPress={() => toggleProductSelection(item.name)}
+                        activeOpacity={0.7}
                      >
-                        <View style={s.journalLeft}>
-                           <Ionicons 
-                              name={isSelected ? "checkbox" : "square-outline"} 
-                              size={24} 
-                              color={isSelected ? activeTheme.primary : '#ccc'} 
-                           />
-                           <View style={{ marginLeft: 10 }}>
-                              <Text style={[s.journalName, !isSelected && { color: '#999' }]}>{item.name}</Text>
-                              <Text style={s.journalSub}>
-                                 {totalGlobal > 0 ? `${((item.montant / totalGlobal) * 100).toFixed(1)}%` : '0%'} {t('of_total')}
-                              </Text>
+                        <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: isSelected ? activeTheme.primary : (isDarkMode ? '#334155' : '#E5E7EB'), justifyContent: 'center', alignItems: 'center' }}>
+                           {isSelected && <Ionicons name="checkmark" size={20} color="#fff" />}
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 14 }}>
+                           <Text style={{ fontSize: 15, fontWeight: '600', color: isSelected ? (isDarkMode ? '#F1F5F9' : '#1F2937') : (isDarkMode ? '#64748B' : '#9CA3AF') }} numberOfLines={1}>{item.name}</Text>
+                           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 }}>
+                              <Text style={{ fontSize: 13, color: isDarkMode ? '#64748B' : '#9CA3AF' }}>{formatMoney(item.montant)} {currency}</Text>
+                              <Text style={{ fontSize: 13, color: activeTheme.primary, fontWeight: '600' }}>• {percent}%</Text>
                            </View>
                         </View>
-                        <Text style={[s.journalPrice, !isSelected && { color: '#999' }]}>{item.montant.toLocaleString()} {currency}</Text>
                      </TouchableOpacity>
                   );
                }}
@@ -596,8 +572,22 @@ export default function StatsScreen() {
   );
 }
 
-const getStyles = (theme: any, dark: boolean) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: dark ? '#0F172A' : '#F8FAFC' },
+const getStyles = (theme: any, dark: boolean) => {
+  const c = {
+    bg: dark ? '#0F172A' : '#F8FAFC',
+    card: dark ? '#1E293B' : '#fff',
+    text: dark ? '#F1F5F9' : '#1E293B',
+    textSec: dark ? '#94A3B8' : '#64748B',
+    border: dark ? '#334155' : '#F1F5F9',
+    modal: dark ? '#1E293B' : '#fff',
+    input: dark ? '#0F172A' : '#fff',
+    shadow: dark ? 0.2 : 0.05,
+    primary: theme.primary,
+    gradient: theme.gradient
+  };
+
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   
   // HEADER
@@ -659,8 +649,19 @@ const getStyles = (theme: any, dark: boolean) => StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: dark ? '#334155' : '#F1F5F9' },
   legendLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   dot: { width: 14, height: 14, borderRadius: 7, marginRight: 12 },
-  legendName: { fontSize: 15, color: dark ? '#F1F5F9' : '#333', fontWeight: '600', marginBottom: 2 },
+  legendName: { fontSize: 15, color: dark ? '#F1F5F9' : '#333', fontWeight: '600' },
   legendValue: { fontSize: 16, fontWeight: '800', color: dark ? '#F1F5F9' : '#333' },
+  percentBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  percentText: { fontSize: 12, fontWeight: 'bold' },
+  
+  // LÉGENDE PRO
+  legendContainerPro: { marginTop: 20, backgroundColor: dark ? '#0F172A' : '#F8FAFC', borderRadius: 16, padding: 5 },
+  legendItemPro: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 12, marginVertical: 2, backgroundColor: dark ? '#1E293B' : '#fff', borderRadius: 12 },
+  colorBar: { width: 5, height: 40, borderRadius: 3 },
+  legendNamePro: { fontSize: 14, color: dark ? '#F1F5F9' : '#1F2937', fontWeight: '700' },
+  legendAmountPro: { fontSize: 12, color: dark ? '#94A3B8' : '#6B7280', marginTop: 2 },
+  percentBadgePro: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, minWidth: 55, alignItems: 'center' },
+  percentTextPro: { fontSize: 13, fontWeight: 'bold', color: '#fff' },
 
   // MODAL STYLE
   modalContainer: { flex: 1, backgroundColor: dark ? '#0F172A' : '#fff', padding: 20 },
@@ -689,3 +690,4 @@ const getStyles = (theme: any, dark: boolean) => StyleSheet.create({
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderColor: dark ? '#334155' : '#f0f0f0' },
   menuText: { fontSize: 14, fontWeight: '500', color: dark ? '#F1F5F9' : '#333' }
 });
+};

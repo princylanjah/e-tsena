@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { 
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, StatusBar, Dimensions, ActivityIndicator
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, Dimensions, ActivityIndicator
 } from 'react-native';
+import { ThemedStatusBar } from '../src/components/ThemedStatusBar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { format, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear } from 'date-fns';
+import formatMoney from '../src/utils/formatMoney';
 import { fr, enUS } from 'date-fns/locale';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
@@ -14,10 +16,12 @@ import * as Sharing from 'expo-sharing';
 
 // 👇 Importations Thème
 import { getDb } from '../src/db/init';
-import { useTheme } from './context/ThemeContext';
+import { useTheme } from '../src/context/ThemeContext';
 import { useSettings } from '../src/context/SettingsContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Using centralized formatMoney util
 
 interface Produit {
   id: number;
@@ -38,7 +42,7 @@ interface Transaction {
 export default function AnalyseProduit() {
   // 🎨 THÈME DYNAMIQUE
   const { activeTheme, isDarkMode } = useTheme();
-  const { t, language } = useSettings();
+  const { t, language, currency } = useSettings();
   const insets = useSafeAreaInsets();
   const s = getStyles(activeTheme, isDarkMode);
 
@@ -57,7 +61,6 @@ export default function AnalyseProduit() {
   const [totalQuantite, setTotalQuantite] = useState(0);
   const [unitePrincipale, setUnitePrincipale] = useState('');
   
-  const [analyzing, setAnalyzing] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'current_month' | 'last_month' | 'year' | 'custom'>('current_month');
@@ -98,7 +101,6 @@ export default function AnalyseProduit() {
     if (!selectedProduit) return;
 
     try {
-      setAnalyzing(true);
       const db = getDb();
       const startStr = dateDebut.toISOString();
       const endStr = dateFin.toISOString();
@@ -114,7 +116,7 @@ export default function AnalyseProduit() {
           WHERE a.dateAchat BETWEEN ? AND ?
           GROUP BY l.libelleProduit
           ORDER BY totalPrix DESC
-        `, [startStr, endStr]);
+        `, [startStr, endStr] as any[]);
 
         setPeriodSummary(result);
         setTotalProduitAnalyse(result.reduce((sum: number, item: any) => sum + item.totalPrix, 0));
@@ -124,7 +126,9 @@ export default function AnalyseProduit() {
       } else {
         // --- MODE TRANSACTION (PRODUIT UNIQUE) ---
         setViewMode('transactions');
-        const produitLibelle = produits.find(p => p.id === selectedProduit)?.libelle;
+        const produitLibelle = produits.find(p => p.id === selectedProduit)?.libelle || '';
+
+        if (!produitLibelle) return;
 
         const result = db.getAllSync(`
           SELECT la.id, a.dateAchat, a.nomListe, la.libelleProduit as produit, 
@@ -134,19 +138,18 @@ export default function AnalyseProduit() {
           WHERE la.libelleProduit = ? 
           AND a.dateAchat BETWEEN ? AND ?
           ORDER BY a.dateAchat DESC
-        `, [produitLibelle, startStr, endStr]) as Transaction[];
+        `, [produitLibelle, startStr, endStr] as any[]);
 
-        setTransactions(result);
-        setTotalProduitAnalyse(result.reduce((sum, t) => sum + t.prixTotal, 0));
-        setTotalQuantite(result.reduce((sum, t) => sum + t.quantite, 0));
-        if (result.length > 0) setUnitePrincipale(result[0].unite);
+        const trans = result as Transaction[];
+        setTransactions(trans);
+        setTotalProduitAnalyse(trans.reduce((sum, t) => sum + t.prixTotal, 0));
+        setTotalQuantite(trans.reduce((sum, t) => sum + t.quantite, 0));
+        if (trans.length > 0) setUnitePrincipale(trans[0].unite);
       }
       
       setShowResults(true);
     } catch (e) {
       console.log(e);
-    } finally {
-      setAnalyzing(false);
     }
   };
 
@@ -166,6 +169,56 @@ export default function AnalyseProduit() {
     }
   };
 
+  const renderSummaryView = () => {
+    if (periodSummary.length === 0) {
+      return (
+        <View style={s.emptyBox}>
+          <Ionicons name="cube-outline" size={40} color="#ccc" />
+          <Text style={{ color: '#999', marginTop: 10 }}>{t('no_product_period')}</Text>
+        </View>
+      );
+    }
+    return periodSummary.map((item: any, idx: number) => (
+      <View key={`summary-${item.libelleProduit}-${idx}`} style={s.transactionItem}>
+         <View style={s.transLeft}>
+            <View style={[s.dateBadge, { backgroundColor: isDarkMode ? '#334155' : '#F3F4F6' }]}>
+              <Ionicons name="cube" size={18} color={activeTheme.primary} />
+            </View>
+            <View>
+              <Text style={s.transPrice}>{item.libelleProduit}</Text>
+              <Text style={s.transDetail}>{item.totalQte} {t('articles')}</Text>
+            </View>
+         </View>
+         <Text style={[s.transPrice, { color: activeTheme.primary }]}>{formatMoney(item.totalPrix)} {currency}</Text>
+      </View>
+    ));
+  };
+
+  const renderTransactionsView = () => {
+    if (transactions.length === 0) {
+       return (
+          <View style={s.emptyBox}>
+             <Ionicons name="document-text-outline" size={40} color="#ccc" />
+             <Text style={{ color: '#999', marginTop: 10 }}>{t('no_purchase_found')}</Text>
+          </View>
+       );
+    }
+    return transactions.map((t) => (
+      <View key={t.id} style={s.transactionItem}>
+         <View style={s.transLeft}>
+            <View style={[s.dateBadge, { backgroundColor: isDarkMode ? '#334155' : '#F3F4F6' }]}>
+              <Text style={s.dateDay}>{format(new Date(t.dateAchat), 'dd')}</Text>
+              <Text style={s.dateMonth}>{format(new Date(t.dateAchat), 'MMM', { locale: language === 'en' ? enUS : fr })}</Text>
+            </View>
+            <View>
+              <Text style={s.transPrice}>{formatMoney(t.prixTotal)} {currency}</Text>
+              <Text style={s.transDetail}>{t.quantite} {t.unite} à {formatMoney(t.prixUnitaire)} {currency}</Text>
+            </View>
+         </View>
+      </View>
+    ));
+  };
+
   const exportToPdf = async () => {
     const dateLocale = language === 'en' ? enUS : fr;
     const isSummary = viewMode === 'summary';
@@ -180,15 +233,15 @@ export default function AnalyseProduit() {
             <td>${item.libelleProduit}</td>
             <td>${item.totalQte}</td>
             <td>-</td>
-            <td>${item.totalPrix.toLocaleString()} Ar</td>
+            <td>${formatMoney(item.totalPrix)} Ar</td>
           </tr>
         `).join('')
       : transactions.map(t => `
           <tr>
             <td>${format(new Date(t.dateAchat), 'dd MMM yyyy', { locale: dateLocale })}</td>
             <td>${t.quantite} ${t.unite}</td>
-            <td>${t.prixUnitaire.toLocaleString()} Ar</td>
-            <td>${t.prixTotal.toLocaleString()} Ar</td>
+            <td>${formatMoney(t.prixUnitaire)} Ar</td>
+            <td>${formatMoney(t.prixTotal)} Ar</td>
           </tr>
         `).join('');
 
@@ -222,7 +275,7 @@ export default function AnalyseProduit() {
           <div class="summary">
             <div class="summary-item">
               <div>${t('total_spent')}</div>
-              <div class="summary-value">${totalProduitAnalyse.toLocaleString()} Ar</div>
+              <div class="summary-value">${formatMoney(totalProduitAnalyse)} Ar</div>
             </div>
             <div class="summary-item">
               <div>${t('quantity')} Total</div>
@@ -259,14 +312,34 @@ export default function AnalyseProduit() {
 
   if (loading) return <View style={s.center}><ActivityIndicator size="large" color={activeTheme.primary} /></View>;
 
+  const getFilterStyle = (type: string) => {
+    const isActive = activeFilter === type;
+    return {
+      container: [s.filterChip, isActive && { backgroundColor: activeTheme.primary }],
+      text: [s.filterText, isActive && { color: '#fff' }]
+    };
+  };
+
   return (
     <View style={s.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-
+      <ThemedStatusBar transparent />
       {/* --- HEADER --- */}
       <LinearGradient colors={activeTheme.gradient as any} style={[s.header, { paddingTop: insets.top + 10 }]}>
+        {/* FIL D'ARIANE */}
+        <TouchableOpacity 
+          onPress={() => router.push('/')} 
+          style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, opacity: 0.9 }}
+        >
+          <Ionicons name="home-outline" size={16} color="rgba(255,255,255,0.8)" />
+          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, marginLeft: 5 }}>{t('home')}</Text>
+          <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.8)" style={{ marginHorizontal: 4 }} />
+          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>{t('reports')}</Text>
+          <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.8)" style={{ marginHorizontal: 4 }} />
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{t('product_analysis')}</Text>
+        </TouchableOpacity>
+
         <View style={s.headerRow}>
-          <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={s.backBtn} onPress={() => router.push('/rapports')}>
              <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <View>
@@ -305,24 +378,19 @@ export default function AnalyseProduit() {
           
           {/* Filtres Rapides */}
           <View style={s.filterRow}>
-            <TouchableOpacity 
-              style={[s.filterChip, activeFilter === 'current_month' && { backgroundColor: activeTheme.primary }]}
-              onPress={() => applyFilter('current_month')}
-            >
-              <Text style={[s.filterText, activeFilter === 'current_month' && { color: '#fff' }]}>Ce mois</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[s.filterChip, activeFilter === 'last_month' && { backgroundColor: activeTheme.primary }]}
-              onPress={() => applyFilter('last_month')}
-            >
-              <Text style={[s.filterText, activeFilter === 'last_month' && { color: '#fff' }]}>Mois dernier</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[s.filterChip, activeFilter === 'year' && { backgroundColor: activeTheme.primary }]}
-              onPress={() => applyFilter('year')}
-            >
-              <Text style={[s.filterText, activeFilter === 'year' && { color: '#fff' }]}>Cette année</Text>
-            </TouchableOpacity>
+            {['current_month', 'last_month', 'year'].map((filterType) => {
+               const style = getFilterStyle(filterType);
+               const label = filterType === 'current_month' ? 'Ce mois' : filterType === 'last_month' ? 'Mois dernier' : 'Cette année';
+               return (
+                <TouchableOpacity 
+                  key={filterType}
+                  style={style.container}
+                  onPress={() => applyFilter(filterType as any)}
+                >
+                  <Text style={style.text}>{label}</Text>
+                </TouchableOpacity>
+               );
+            })}
           </View>
 
           <View style={s.dateRow}>
@@ -367,7 +435,7 @@ export default function AnalyseProduit() {
                         </View>
                         <View>
                             <Text style={s.statLabel}>{t('expenses')}</Text>
-                            <Text style={[s.statValue, { color: activeTheme.primary }]}>{totalProduitAnalyse.toLocaleString()} Ar</Text>
+                            <Text style={[s.statValue, { color: activeTheme.primary }]}>{formatMoney(totalProduitAnalyse)} {currency}</Text>
                         </View>
                     </View>
                     
@@ -379,59 +447,13 @@ export default function AnalyseProduit() {
                         </View>
                         <View>
                             <Text style={s.statLabel}>{t('quantity')}</Text>
-                            <Text style={[s.statValue, { color: '#10B981' }]}>{totalQuantite} {unitePrincipale}</Text>
+                            <Text style={[s.statValue, { color: '#10B981' }]}>{totalQuantite} {unitePrincipale === 'pcs' ? t('articles') : unitePrincipale}</Text>
                         </View>
                     </View>
                 </LinearGradient>
 
                 {/* CONTENU : LISTE TRANSACTIONS OU RÉSUMÉ PRODUITS */}
-                {viewMode === 'summary' ? (
-                  // --- VUE RÉSUMÉ (TOUS LES PRODUITS) ---
-                  periodSummary.length === 0 ? (
-                    <View style={s.emptyBox}>
-                      <Ionicons name="cube-outline" size={40} color="#ccc" />
-                      <Text style={{ color: '#999', marginTop: 10 }}>{t('no_product_period')}</Text>
-                    </View>
-                  ) : (
-                    periodSummary.map((item: any, index: number) => (
-                      <View key={index} style={s.transactionItem}>
-                         <View style={s.transLeft}>
-                            <View style={[s.dateBadge, { backgroundColor: isDarkMode ? '#334155' : '#F3F4F6' }]}>
-                              <Ionicons name="cube" size={18} color={activeTheme.primary} />
-                            </View>
-                            <View>
-                              <Text style={s.transPrice}>{item.libelleProduit}</Text>
-                              <Text style={s.transDetail}>{item.totalQte} {t('articles')}</Text>
-                            </View>
-                         </View>
-                         <Text style={[s.transPrice, { color: activeTheme.primary }]}>{item.totalPrix.toLocaleString()} Ar</Text>
-                      </View>
-                    ))
-                  )
-                ) : (
-                  // --- VUE TRANSACTIONS (PRODUIT UNIQUE) ---
-                  transactions.length === 0 ? (
-                     <View style={s.emptyBox}>
-                        <Ionicons name="document-text-outline" size={40} color="#ccc" />
-                        <Text style={{ color: '#999', marginTop: 10 }}>{t('no_purchase_found')}</Text>
-                     </View>
-                  ) : (
-                     transactions.map((t) => (
-                        <View key={t.id} style={s.transactionItem}>
-                           <View style={s.transLeft}>
-                              <View style={[s.dateBadge, { backgroundColor: isDarkMode ? '#334155' : '#F3F4F6' }]}>
-                                <Text style={s.dateDay}>{format(new Date(t.dateAchat), 'dd')}</Text>
-                                <Text style={s.dateMonth}>{format(new Date(t.dateAchat), 'MMM', { locale: language === 'en' ? enUS : fr })}</Text>
-                              </View>
-                              <View>
-                                <Text style={s.transPrice}>{t.prixTotal.toLocaleString()} Ar</Text>
-                                <Text style={s.transDetail}>{t.quantite} {t.unite} à {t.prixUnitaire} Ar</Text>
-                              </View>
-                           </View>
-                        </View>
-                     ))
-                  )
-                )}
+                {viewMode === 'summary' ? renderSummaryView() : renderTransactionsView()}
              </View>
           )}
         </View>
@@ -498,9 +520,23 @@ export default function AnalyseProduit() {
   );
 }
 
-const getStyles = (theme: any, dark: boolean) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: dark ? '#0F172A' : '#F8FAFC' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: dark ? '#0F172A' : '#F8FAFC' },
+const getStyles = (theme: any, dark: boolean) => {
+  const c = {
+    bg: dark ? '#0F172A' : '#F8FAFC',
+    card: dark ? '#1E293B' : '#fff',
+    text: dark ? '#F1F5F9' : '#1E293B',
+    textSec: dark ? '#94A3B8' : '#64748B',
+    border: dark ? '#334155' : '#F1F5F9',
+    modal: dark ? '#1E293B' : '#fff',
+    input: dark ? '#0F172A' : '#fff',
+    shadow: dark ? 0.2 : 0.05,
+    primary: theme.primary,
+    gradient: theme.gradient
+  };
+
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.bg },
 
   // HEADER
   header: { paddingBottom: 20, paddingHorizontal: 20, borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
@@ -512,12 +548,12 @@ const getStyles = (theme: any, dark: boolean) => StyleSheet.create({
   scrollContent: { padding: 20 },
 
   // CARDS
-  card: { backgroundColor: dark ? '#1E293B' : '#fff', borderRadius: 16, padding: 20, marginBottom: 15, elevation: 2, shadowColor: '#000', shadowOpacity: dark ? 0.3 : 0.1, shadowRadius: 4 },
+  card: { backgroundColor: c.card, borderRadius: 16, padding: 20, marginBottom: 15, elevation: 2, shadowColor: '#000', shadowOpacity: c.shadow, shadowRadius: 4 },
   label: { fontSize: 14, fontWeight: '700', color: dark ? '#E2E8F0' : '#374151', marginBottom: 10 },
-  subLabel: { fontSize: 11, color: dark ? '#94A3B8' : '#6B7280', marginBottom: 5 },
+  subLabel: { fontSize: 11, color: c.textSec, marginBottom: 5 },
 
-  selectBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: dark ? '#334155' : '#E5E7EB', padding: 14, borderRadius: 12, backgroundColor: dark ? '#0F172A' : '#F9FAFB' },
-  selectText: { fontSize: 15, color: dark ? '#F1F5F9' : '#1F2937', fontWeight: '500' },
+  selectBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: c.border, padding: 14, borderRadius: 12, backgroundColor: c.input },
+  selectText: { fontSize: 15, color: c.text, fontWeight: '500' },
   iconBox: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
 
   // FILTERS
@@ -526,15 +562,15 @@ const getStyles = (theme: any, dark: boolean) => StyleSheet.create({
   filterText: { fontSize: 12, fontWeight: '600', color: dark ? '#94A3B8' : '#4B5563' },
 
   dateRow: { flexDirection: 'row', gap: 15 },
-  dateBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: dark ? '#334155' : '#E5E7EB', padding: 12, borderRadius: 10, backgroundColor: dark ? '#0F172A' : '#fff' },
-  dateText: { fontWeight: '500', color: dark ? '#F1F5F9' : '#374151' },
+  dateBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: c.border, padding: 12, borderRadius: 10, backgroundColor: c.card },
+  dateText: { fontWeight: '500', color: c.text },
 
   // RESULTS
-  divider: { height: 1, backgroundColor: dark ? '#334155' : '#E2E8F0', marginVertical: 20 },
+  divider: { height: 1, backgroundColor: c.border, marginVertical: 20 },
   
   resultHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  resultTitle: { fontWeight: 'bold', fontSize: 18, color: dark ? '#F1F5F9' : '#111' },
-  resultSubtitle: { fontSize: 12, color: dark ? '#94A3B8' : '#6B7280' },
+  resultTitle: { fontWeight: 'bold', fontSize: 18, color: c.text },
+  resultSubtitle: { fontSize: 12, color: c.textSec },
   
   pdfBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EF4444', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   pdfBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 11 },
@@ -542,32 +578,33 @@ const getStyles = (theme: any, dark: boolean) => StyleSheet.create({
   statsBox: { flexDirection: 'row', borderRadius: 16, padding: 20, marginBottom: 25, borderWidth: 1, borderColor: dark ? '#334155' : 'rgba(0,0,0,0.05)' },
   statItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 15 },
   statIconBox: { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
-  statLabel: { fontSize: 11, color: dark ? '#94A3B8' : '#64748B', fontWeight: '600', textTransform: 'uppercase', marginBottom: 2 },
+  statLabel: { fontSize: 11, color: c.textSec, fontWeight: '600', textTransform: 'uppercase', marginBottom: 2 },
   statValue: { fontSize: 18, fontWeight: '800' },
   statDivider: { width: 1, backgroundColor: dark ? '#334155' : 'rgba(0,0,0,0.1)', marginHorizontal: 15 },
 
-  transactionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: dark ? '#334155' : '#f0f0f0' },
+  transactionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: c.border },
   transLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dateBadge: { width: 45, height: 45, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  dateDay: { fontSize: 16, fontWeight: 'bold', color: dark ? '#F1F5F9' : '#111' },
-  dateMonth: { fontSize: 10, color: dark ? '#94A3B8' : '#6B7280', textTransform: 'uppercase' },
+  dateDay: { fontSize: 16, fontWeight: 'bold', color: c.text },
+  dateMonth: { fontSize: 10, color: c.textSec, textTransform: 'uppercase' },
   
-  transPrice: { fontSize: 15, fontWeight: '700', color: dark ? '#F1F5F9' : '#111' },
-  transDetail: { fontSize: 12, color: dark ? '#94A3B8' : '#6B7280' },
+  transPrice: { fontSize: 15, fontWeight: '700', color: c.text },
+  transDetail: { fontSize: 12, color: c.textSec },
 
   emptyBox: { alignItems: 'center', padding: 30 },
 
   // MODAL
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: dark ? '#1E293B' : '#fff', borderRadius: 20, padding: 20, maxHeight: '60%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderColor: dark ? '#334155' : '#eee', paddingBottom: 10 },
-  modalTitle: { fontWeight: 'bold', fontSize: 18, color: dark ? '#F1F5F9' : '#111' },
-  modalItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderColor: dark ? '#334155' : '#f0f0f0' },
-  itemText: { fontSize: 16, color: dark ? '#F1F5F9' : '#333' },
+  modalContent: { backgroundColor: c.modal, borderRadius: 20, padding: 20, maxHeight: '60%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderColor: c.border, paddingBottom: 10 },
+  modalTitle: { fontWeight: 'bold', fontSize: 18, color: c.text },
+  modalItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderColor: c.border },
+  itemText: { fontSize: 16, color: c.text },
 
   // MENU HAMBURGER
-  menuBox: { backgroundColor: dark ? '#1E293B' : '#fff', padding: 20, borderRadius: 20, position: 'absolute', top: 100, right: 20, width: 250, elevation: 10 },
-  menuTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: dark ? '#F1F5F9' : '#333' },
-  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderColor: dark ? '#334155' : '#f0f0f0' },
-  menuText: { fontSize: 14, fontWeight: '500', color: dark ? '#E2E8F0' : '#333' }
+  menuBox: { backgroundColor: c.card, padding: 20, borderRadius: 20, position: 'absolute', top: 100, right: 20, width: 250, elevation: 10 },
+  menuTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: c.text },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderColor: c.border },
+  menuText: { fontSize: 14, fontWeight: '500', color: c.text }
 });
+};

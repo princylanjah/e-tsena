@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { format } from 'date-fns';
+import formatMoney from '../utils/formatMoney';
 import { COLORS, SECTION_COLORS } from '@constants/colors';
 
 interface Achat {
@@ -66,7 +67,7 @@ export const AchatCard: React.FC<AchatCardProps> = ({ achat, onPress }) => {
         {/* Prix et flèche */}
         <View style={styles.cardRight}>
           <Text style={styles.cardTotal}>
-            {achat.totalDepense.toLocaleString()} Ar
+            {formatMoney(achat.totalDepense)} {""}{' '}{'Ar'}
           </Text>
           <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
         </View>

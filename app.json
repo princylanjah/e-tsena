@@ -5,7 +5,25 @@
     "scheme": "etsena",
     "orientation": "portrait",
     "newArchEnabled": true,
-    "plugins": ["expo-router"],
-    "extra": { "router": { "origin": "https://app" } }
+    
+    "userInterfaceStyle": "automatic",
+
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#1E293B",
+      "translucent": false
+    },
+
+    "plugins": [
+      "expo-router",
+      "expo-asset",
+      "expo-font",
+      "expo-sqlite"
+    ],
+    "extra": {
+      "router": {
+        "origin": "https://app"
+      }
+    }
   }
 }
