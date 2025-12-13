@@ -9,6 +9,9 @@
 // ==================== COULEURS PRINCIPALES ====================
 export const COLORS = {
   // BRAND / PRIMARY (Violet #7143b5 - couleur de base)
+  
+    //lavender: '#VOTRE_COULEUR',    // Couleur principale
+   // purpleSoft: '#VOTRE_COULEUR',  // Couleur secondair
   primary: '#7143b5',        // Violet principal BASE
   primaryDark: '#5d3694',    // Violet foncé (-20% luminosité)
   primaryLight: '#8b5fd4',   // Violet clair (+15% luminosité)
